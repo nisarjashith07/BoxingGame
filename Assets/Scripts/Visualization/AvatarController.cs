@@ -22,6 +22,14 @@ public class AvatarController : MonoBehaviour
     private Vector3 s_rightHandPos, s_rightElbowPos;
     private Quaternion s_leftHandRot, s_rightHandRot;
 
+    // Manual Punch State
+    private float manualPunchTimer;
+    private bool manualPunchIsLeft;
+
+    public Vector3 LeftHandWorldPos => s_leftHandPos != Vector3.zero ? s_leftHandPos : (animator != null && animator.GetBoneTransform(HumanBodyBones.LeftHand) != null ? animator.GetBoneTransform(HumanBodyBones.LeftHand).position : transform.position + transform.forward * 0.5f);
+    public Vector3 RightHandWorldPos => s_rightHandPos != Vector3.zero ? s_rightHandPos : (animator != null && animator.GetBoneTransform(HumanBodyBones.RightHand) != null ? animator.GetBoneTransform(HumanBodyBones.RightHand).position : transform.position + transform.forward * 0.5f);
+    public Vector3 HeadWorldPos => animator != null && animator.GetBoneTransform(HumanBodyBones.Head) != null ? animator.GetBoneTransform(HumanBodyBones.Head).position : transform.position + Vector3.up * 1.6f;
+
     void Start()
     {
         animator = GetComponent<Animator>();
@@ -30,6 +38,12 @@ public class AvatarController : MonoBehaviour
     public void UpdatePose(PoseData pose)
     {
         currentPose = pose;
+    }
+
+    public void TriggerManualPunch(bool isLeft)
+    {
+        manualPunchTimer = 0.35f;
+        manualPunchIsLeft = isLeft;
     }
 
     private Vector3 GetMpVector(int index)
@@ -42,20 +56,67 @@ public class AvatarController : MonoBehaviour
 
     void Update()
     {
-        if (currentPose == null || animator == null) return;
+        if (animator == null) return;
 
-        // --- ARM CALCULATIONS ---
-        CalculateArmTargets(
-            11, 13, 15, 19, 17, 
-            HumanBodyBones.LeftShoulder, HumanBodyBones.LeftLowerArm, HumanBodyBones.LeftHand,
-            ref s_leftHandPos, ref s_leftElbowPos, ref s_leftHandRot
-        );
+        // Default boxing guard positions
+        Transform head = animator.GetBoneTransform(HumanBodyBones.Head);
+        Vector3 headPos = head != null ? head.position : transform.position + Vector3.up * 1.55f;
+        Vector3 guardLeft = headPos + transform.forward * 0.35f - transform.right * 0.18f + Vector3.down * 0.12f;
+        Vector3 guardRight = headPos + transform.forward * 0.35f + transform.right * 0.18f + Vector3.down * 0.12f;
 
-        CalculateArmTargets(
-            12, 14, 16, 20, 18, 
-            HumanBodyBones.RightShoulder, HumanBodyBones.RightLowerArm, HumanBodyBones.RightHand,
-            ref s_rightHandPos, ref s_rightElbowPos, ref s_rightHandRot
-        );
+        Transform leftShoulder = animator.GetBoneTransform(HumanBodyBones.LeftShoulder);
+        Transform rightShoulder = animator.GetBoneTransform(HumanBodyBones.RightShoulder);
+        Vector3 lShoulderPos = leftShoulder != null ? leftShoulder.position : transform.position - transform.right * 0.25f + Vector3.up * 1.4f;
+        Vector3 rShoulderPos = rightShoulder != null ? rightShoulder.position : transform.position + transform.right * 0.25f + Vector3.up * 1.4f;
+
+        if (currentPose != null && currentPose.landmarks != null && currentPose.landmarks.Count == 33)
+        {
+            // --- ARM CALCULATIONS FROM MEDIAPIPE ---
+            CalculateArmTargets(
+                11, 13, 15, 19, 17, 
+                HumanBodyBones.LeftShoulder, HumanBodyBones.LeftLowerArm, HumanBodyBones.LeftHand,
+                ref s_leftHandPos, ref s_leftElbowPos, ref s_leftHandRot
+            );
+
+            CalculateArmTargets(
+                12, 14, 16, 20, 18, 
+                HumanBodyBones.RightShoulder, HumanBodyBones.RightLowerArm, HumanBodyBones.RightHand,
+                ref s_rightHandPos, ref s_rightElbowPos, ref s_rightHandRot
+            );
+        }
+        else
+        {
+            // Stand in default boxing guard when no pose is received
+            s_leftHandPos = Vector3.Lerp(s_leftHandPos == Vector3.zero ? guardLeft : s_leftHandPos, guardLeft, Time.deltaTime * smoothingSpeed);
+            s_rightHandPos = Vector3.Lerp(s_rightHandPos == Vector3.zero ? guardRight : s_rightHandPos, guardRight, Time.deltaTime * smoothingSpeed);
+
+            s_leftElbowPos = lShoulderPos - transform.right * 0.2f + Vector3.down * 0.25f;
+            s_rightElbowPos = rShoulderPos + transform.right * 0.2f + Vector3.down * 0.25f;
+
+            s_leftHandRot = Quaternion.LookRotation(transform.forward, Vector3.up);
+            s_rightHandRot = Quaternion.LookRotation(transform.forward, Vector3.up);
+        }
+
+        // Manual Punch Overlay
+        if (manualPunchTimer > 0f)
+        {
+            manualPunchTimer -= Time.deltaTime;
+            float punchProgress = 1f - (manualPunchTimer / 0.35f);
+            float ext = Mathf.Sin(punchProgress * Mathf.PI); // 0 -> 1 -> 0
+
+            Vector3 punchTargetOffset = transform.forward * (ext * 0.95f);
+
+            if (manualPunchIsLeft)
+            {
+                s_leftHandPos = guardLeft + punchTargetOffset;
+                s_leftHandRot = Quaternion.LookRotation(transform.forward, Vector3.up);
+            }
+            else
+            {
+                s_rightHandPos = guardRight + punchTargetOffset;
+                s_rightHandRot = Quaternion.LookRotation(transform.forward, Vector3.up);
+            }
+        }
     }
 
     private void CalculateArmTargets(
@@ -77,10 +138,6 @@ public class AvatarController : MonoBehaviour
 
         if (mps == Vector3.zero || mpw == Vector3.zero) return;
 
-        // SIMPLIFIED, DIRECT VECTOR OFFSET:
-        // We take the exact 3D displacement vector from the shoulder to the wrist in MediaPipe
-        // Then we rotate it to match the character's facing direction, and scale it up to the Avatar's physical size.
-        
         Vector3 localReachVector = mpw - mps;
         Vector3 worldReachVector = transform.TransformDirection(localReachVector) * avatarScale;
         Vector3 targetPos = shoulder.position + worldReachVector;
@@ -108,7 +165,9 @@ public class AvatarController : MonoBehaviour
         if (animator == null) return;
 
         animator.SetLookAtWeight(ikWeight);
-        animator.SetLookAtPosition(animator.GetBoneTransform(HumanBodyBones.Head).position + transform.forward * 5f);
+        Transform head = animator.GetBoneTransform(HumanBodyBones.Head);
+        if (head != null)
+            animator.SetLookAtPosition(head.position + transform.forward * 5f);
 
         // Left
         animator.SetIKHintPositionWeight(AvatarIKHint.LeftElbow, ikWeight);

@@ -1,4 +1,0 @@
-repository "humanoid/humanoid@13469845771702@cloud"
-  path "/"
-    br "/main"
-    co "/main"
