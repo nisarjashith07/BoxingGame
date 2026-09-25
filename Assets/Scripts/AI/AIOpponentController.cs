@@ -46,6 +46,12 @@ namespace BoxingAI
             return currentAction;
         }
 
+        public void SetExternalAction(BoxingObservation observation, BoxingAction action)
+        {
+            latestObservation = observation;
+            currentAction = action;
+        }
+
         public void ResetBrain()
         {
             brain = new AIOpponentBrain(profile);

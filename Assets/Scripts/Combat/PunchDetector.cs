@@ -166,6 +166,20 @@ namespace BoxingAI
             Debug.Log($"[PunchDetector] Manual punch triggered: {punchType}");
         }
 
+        public void ResetForMatch()
+        {
+            punchCooldownTimer = 0f;
+            recoveryTimer = 0f;
+            punchActiveTimer = 0f;
+            IsPunching = false;
+            GuardLevel01 = 0f;
+            manualGuardActive = false;
+            hasPreviousFrame = false;
+            prevLeftWrist = prevRightWrist = currLeftWrist = currRightWrist = Vector3.zero;
+            leftWristVelocity = rightWristVelocity = Vector3.zero;
+            PlayerVelocity = Vector3.zero;
+        }
+
         /// <summary>
         /// Call each frame with the latest PoseData from PoseManager.
         /// Processes landmarks to detect punches and guard state.

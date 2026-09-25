@@ -30,6 +30,7 @@ namespace BoxingAI
 
         [Header("Match Configuration")]
         [SerializeField] private AIDifficulty difficulty = AIDifficulty.Easy;
+        [SerializeField] private bool enablePythonRLBridge = true;
 
         // Fighter states
         private FighterState playerState = new FighterState();
@@ -41,6 +42,13 @@ namespace BoxingAI
         private BoxingAction lastAIAction = BoxingAction.Idle;
 
         private bool matchActive;
+        private RLTrainingBridge trainingBridge;
+        private Vector3 initialPlayerPosition;
+        private Quaternion initialPlayerRotation;
+        private Vector3 initialAIPosition;
+        private Quaternion initialAIRotation;
+        private bool initialTransformsCached;
+        private bool pythonTrainingSession;
 
         // --- Public API ---
 
@@ -83,6 +91,9 @@ namespace BoxingAI
                 if (avatar != null)
                     playerTransform = avatar.transform;
             }
+
+            if (enablePythonRLBridge && trainingBridge == null)
+                trainingBridge = GetComponent<RLTrainingBridge>() ?? gameObject.AddComponent<RLTrainingBridge>();
         }
 
         public void Initialize(
@@ -107,6 +118,18 @@ namespace BoxingAI
         {
             AutoFindReferences();
 
+            if (playerTransform != null)
+            {
+                initialPlayerPosition = playerTransform.position;
+                initialPlayerRotation = playerTransform.rotation;
+            }
+            if (aiFighter != null)
+            {
+                initialAIPosition = aiFighter.transform.position;
+                initialAIRotation = aiFighter.transform.rotation;
+            }
+            initialTransformsCached = true;
+
             // Configure AI difficulty
             if (aiOpponent != null)
                 aiOpponent.SetDifficulty(difficulty);
@@ -121,8 +144,24 @@ namespace BoxingAI
         /// <summary>Starts or restarts the match.</summary>
         public void StartMatch()
         {
+            if (initialTransformsCached)
+            {
+                if (playerTransform != null)
+                {
+                    CharacterController playerController = playerTransform.GetComponent<CharacterController>();
+                    if (playerController != null && playerController.enabled) playerController.enabled = false;
+                    playerTransform.SetPositionAndRotation(initialPlayerPosition, initialPlayerRotation);
+                    if (playerController != null) playerController.enabled = true;
+                }
+                if (aiFighter != null)
+                    aiFighter.ResetForMatch(initialAIPosition, initialAIRotation);
+            }
+
             playerState.Reset();
             aiState.Reset();
+            if (playerTransform != null) playerState.ResetPosition(playerTransform.position);
+            if (aiFighter != null) aiState.ResetPosition(aiFighter.transform.position);
+            if (punchDetector != null) punchDetector.ResetForMatch();
 
             if (aiOpponent != null)
                 aiOpponent.ResetBrain();
@@ -133,6 +172,7 @@ namespace BoxingAI
             playerPunchProcessed = false;
             aiPunchProcessed = false;
             matchActive = true;
+            lastAIAction = BoxingAction.Idle;
 
             Debug.Log($"[Boxing] Match started — Difficulty: {difficulty}");
         }
@@ -141,17 +181,56 @@ namespace BoxingAI
 
         private void Update()
         {
-            if (!matchActive) return;
+            bool isTrainingStep = false;
+            BoxingAction externalAction = BoxingAction.Idle;
+            float playerHealthBeforeStep = playerState.health;
+            float aiHealthBeforeStep = aiState.health;
+
+            if (trainingBridge != null && trainingBridge.TryReceive(out RLTrainingBridge.TrainingCommand command))
+            {
+                if (command.command == "reset")
+                {
+                    pythonTrainingSession = true;
+                    StartMatch();
+                    UpdatePlayerState();
+                    UpdateAIState();
+                    trainingBridge.ReplyReset(BuildTrainingObservation());
+                    return;
+                }
+
+                if (command.command == "step")
+                {
+                    if (command.action < 0 || command.action > (int)BoxingAction.DodgeRight)
+                    {
+                        trainingBridge.ReplyError("Action must be an integer from 0 through 11.");
+                        return;
+                    }
+                    isTrainingStep = true;
+                    externalAction = (BoxingAction)command.action;
+                    playerHealthBeforeStep = playerState.health;
+                    aiHealthBeforeStep = aiState.health;
+                }
+            }
+
+            if (!matchActive)
+            {
+                if (isTrainingStep)
+                    ReplyTerminalTrainingStep(true, playerHealthBeforeStep, aiHealthBeforeStep,
+                        playerState.health >= aiState.health ? "player" : "opponent");
+                return;
+            }
 
             // --- Win/Loss Check ---
             if (!playerState.IsAlive)
             {
                 EndMatch("AI WINS — KO!");
+                ReplyTerminalTrainingStep(isTrainingStep, playerHealthBeforeStep, aiHealthBeforeStep, "opponent");
                 return;
             }
             if (!aiState.IsAlive)
             {
                 EndMatch("PLAYER WINS — KO!");
+                ReplyTerminalTrainingStep(isTrainingStep, playerHealthBeforeStep, aiHealthBeforeStep, "player");
                 return;
             }
             if (matchTimer != null && matchTimer.TimeRemaining <= 0f)
@@ -159,6 +238,8 @@ namespace BoxingAI
                 string winner = playerState.health >= aiState.health
                     ? "PLAYER WINS" : "AI WINS";
                 EndMatch($"{winner} — Decision!");
+                ReplyTerminalTrainingStep(isTrainingStep, playerHealthBeforeStep, aiHealthBeforeStep,
+                    playerState.health >= aiState.health ? "player" : "opponent");
                 return;
             }
 
@@ -182,34 +263,92 @@ namespace BoxingAI
             }
 
             // --- 3. AI Decision ---
-            if (aiOpponent != null && aiFighter != null && punchDetector != null)
+            if (aiOpponent != null && aiFighter != null && punchDetector != null
+                && (!pythonTrainingSession || isTrainingStep))
             {
                 float roundTime01 = matchTimer != null ? matchTimer.NormalizedTimeRemaining : 1f;
                 BoxingObservation observation = ObservationBuilder.Build(
                     aiState, playerState, punchDetector, aiFighter, roundTime01);
 
-                BoxingAction action = aiOpponent.Evaluate(observation);
+                BoxingAction action;
+                if (isTrainingStep)
+                {
+                    aiOpponent.SetExternalAction(observation, externalAction);
+                    action = externalAction;
+                }
+                else
+                {
+                    action = aiOpponent.Evaluate(observation);
+                }
+
+                bool punchAction = action >= BoxingAction.Jab && action <= BoxingAction.HookRight;
+                bool dodgeAction = action == BoxingAction.DodgeLeft || action == BoxingAction.DodgeRight;
+                bool canStartPunch = aiFighter.CanStartPunch;
+                if (punchAction && (!aiState.CanAttack || !canStartPunch)) action = BoxingAction.Idle;
+                if (dodgeAction && !aiState.CanDodge) action = BoxingAction.Idle;
+                if (action == BoxingAction.Block && !aiState.CanBlock) action = BoxingAction.Idle;
 
                 // --- 4. Execute AI Action ---
                 aiFighter.ExecuteAction(action);
 
-                // Drain AI stamina for costly actions only on initiation
-                if (settings != null && action != lastAIAction)
+                // Charge the same stamina/cooldown cost whenever a punch or dodge begins.
+                if (settings != null && punchAction && action != BoxingAction.Idle && canStartPunch)
                 {
-                    if (action >= BoxingAction.Jab && action <= BoxingAction.HookRight)
-                        aiState.DrainStamina(settings.punchStaminaCost);
-                    else if (action == BoxingAction.DodgeLeft || action == BoxingAction.DodgeRight)
-                        aiState.DrainStamina(settings.dodgeStaminaCost);
+                    aiState.DrainStamina(settings.punchStaminaCost);
+                    aiState.attackCooldown = settings.attackCooldown;
+                }
+                else if (settings != null && dodgeAction && action != BoxingAction.Idle)
+                {
+                    aiState.DrainStamina(settings.dodgeStaminaCost);
+                    aiState.dodgeCooldown = settings.dodgeCooldown;
                 }
                 lastAIAction = action;
             }
 
             // --- 5. Hit Detection ---
             ProcessHits();
+            UpdatePlayerState();
+            UpdateAIState();
+
+            if (!playerState.IsAlive)
+            {
+                EndMatch("AI WINS — KO!");
+                ReplyTerminalTrainingStep(isTrainingStep, playerHealthBeforeStep, aiHealthBeforeStep, "opponent");
+                return;
+            }
+            if (!aiState.IsAlive)
+            {
+                EndMatch("PLAYER WINS — KO!");
+                ReplyTerminalTrainingStep(isTrainingStep, playerHealthBeforeStep, aiHealthBeforeStep, "player");
+                return;
+            }
+
+            if (isTrainingStep)
+            {
+                float reward = (playerHealthBeforeStep - playerState.health) / 100f
+                    - (aiHealthBeforeStep - aiState.health) / 100f;
+                trainingBridge.ReplyStep(BuildTrainingObservation(), reward, false, false, string.Empty);
+            }
 
             // --- 6. Update HUD ---
             if (combatHUD != null)
                 combatHUD.UpdateHUD(playerState, aiState);
+        }
+
+        private BoxingObservation BuildTrainingObservation()
+        {
+            float roundTime01 = matchTimer != null ? matchTimer.NormalizedTimeRemaining : 1f;
+            return ObservationBuilder.Build(aiState, playerState, punchDetector, aiFighter, roundTime01);
+        }
+
+        private void ReplyTerminalTrainingStep(bool isTrainingStep, float playerHealthBeforeStep,
+            float aiHealthBeforeStep, string winner)
+        {
+            if (!isTrainingStep || trainingBridge == null) return;
+            float reward = (playerHealthBeforeStep - playerState.health) / 100f
+                - (aiHealthBeforeStep - aiState.health) / 100f;
+            reward += winner == "opponent" ? 1f : winner == "player" ? -1f : 0f;
+            trainingBridge.ReplyStep(BuildTrainingObservation(), reward, true, false, winner);
         }
 
         // --- State Sync ---

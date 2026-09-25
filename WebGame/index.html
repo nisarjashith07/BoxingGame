@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10110f">
+  <title>Corner — Browser Boxing</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="motion3d.css">
+</head>
+<body>
+  <main class="game-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Corner home"><span class="brand-mark">C</span><span>CORNER<small>BOXING CLUB</small></span></a>
+      <div class="event"><span class="live-dot"></span> CLUB FIGHT NIGHT <span class="event-divider">/</span> BOUT 01</div>
+      <div class="top-actions"><button id="motionButton" class="icon-button motion-button" aria-label="Enable webcam motion controls">◎ <span>ENABLE MOTION</span></button><button id="soundButton" class="icon-button" aria-label="Toggle sound" title="Toggle sound">♫ <span>SOUND</span></button></div>
+    </header>
+
+    <section class="scoreboard" aria-label="Fight status">
+      <div class="fighter-card player-card">
+        <div class="fighter-meta"><div><span class="eyebrow">RED CORNER · YOU</span><h2>THE CHALLENGER</h2></div><span class="round-tag">AMATEUR</span></div>
+        <div class="health-track"><div id="playerHealthBar" class="health-fill player-fill"></div></div>
+        <div class="stat-row"><b><span id="playerHealth">100</span><small> / 100 HP</small></b><span class="stat-label">HEALTH</span></div>
+        <div class="stamina-track"><div id="playerStaminaBar" class="stamina-fill"></div></div>
+        <div class="stat-row substat"><span>STAMINA</span><span id="playerStamina">100%</span></div>
+      </div>
+      <div class="round-clock"><span class="eyebrow">ROUND</span><b>01</b><span id="timer">3:00</span><span class="round-rule"></span><span class="round-caption">3 × 3 MIN</span></div>
+      <div class="fighter-card opponent-card">
+        <div class="fighter-meta"><div><span class="eyebrow">BLUE CORNER · CPU</span><h2>IRON MIKE</h2></div><span id="difficultyTag" class="round-tag">EASY</span></div>
+        <div class="health-track"><div id="aiHealthBar" class="health-fill ai-fill"></div></div>
+        <div class="stat-row"><b><span id="aiHealth">100</span><small> / 100 HP</small></b><span class="stat-label">HEALTH</span></div>
+        <div class="stamina-track"><div id="aiStaminaBar" class="stamina-fill ai-stamina"></div></div>
+        <div class="stat-row substat"><span>STAMINA</span><span id="aiStamina">100%</span></div>
+      </div>
+    </section>
+
+    <section class="arena-wrap">
+      <div id="arena" aria-label="3D boxing ring. Use motion controls, keyboard, or touch controls to fight."></div>
+      <video id="cameraFeed" class="camera-feed" autoplay playsinline muted></video>
+      <div id="trackingStatus" class="tracking-status">MOTION CONTROLS OFF</div>
+      <div class="arena-topline"><span><i></i> MAIN EVENT</span><span>EST. 2024 &nbsp;·&nbsp; BROOKLYN, NY</span></div>
+      <div id="message" class="fight-message" aria-live="polite">FIGHT!</div>
+      <div id="result" class="result-overlay" hidden><span class="eyebrow">BOUT COMPLETE</span><h2 id="resultTitle">KNOCKOUT</h2><p id="resultText"></p><button id="rematchButton" class="primary-button">FIGHT AGAIN <span>↗</span></button></div>
+      <div class="arena-bottomline"><span>★ &nbsp;ROUND 1 OF 3</span><span id="distanceLabel">IN THE POCKET</span></div>
+    </section>
+
+    <section class="control-deck">
+      <div class="control-intro"><span class="eyebrow">YOUR CORNER</span><h3>MAKE YOUR<br>MOVE.</h3><p>Read the opening.<br>Pick your moment.</p></div>
+      <div class="movement-controls"><span class="eyebrow">FOOTWORK</span><div class="move-row"><kbd>A</kbd><kbd>W</kbd><kbd>D</kbd></div><div class="move-help"><span>← CIRCLE</span><span>STEP IN</span><span>CIRCLE →</span></div><div class="back-key"><kbd>S</kbd><span>STEP BACK</span></div></div>
+      <div class="punch-controls"><span class="eyebrow">COMBINATIONS</span><div class="punch-grid"><button class="action-key" data-action="jab"><kbd>J</kbd><span><b>JAB</b><small>8 DMG</small></span><em>01</em></button><button class="action-key" data-action="cross"><kbd>K</kbd><span><b>CROSS</b><small>14 DMG</small></span><em>02</em></button><button class="action-key" data-action="leftHook"><kbd>H</kbd><span><b>LEFT HOOK</b><small>18 DMG</small></span><em>03</em></button><button class="action-key" data-action="rightHook"><kbd>L</kbd><span><b>RIGHT HOOK</b><small>18 DMG</small></span><em>04</em></button></div></div>
+      <button id="guardButton" class="guard-control"><span class="guard-icon">⌑</span><span><b>HIGH GUARD</b><small>HOLD SPACE / B</small></span><kbd>SPACE</kbd></button>
+    </section>
+
+    <footer class="footer"><span>TRAIN HARD. FIGHT SMART.</span><span>KEYBOARD READY <i>●</i> BROWSER EDITION</span></footer>
+  </main>
+  <script type="module" src="game3d.js"></script>
+</body>
+</html>

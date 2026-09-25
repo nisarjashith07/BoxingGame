@@ -1,5 +1,7 @@
 # AI Boxing Game — MediaPipe & Unity 6
 
+> **Browser edition:** The 3D browser game is in [`WebGame/`](WebGame/). Start the local Python server to enable webcam motion controls and AI integration. The same backend includes a Gymnasium bridge that trains PPO against the live Unity boxing match. See [`WebGame/backend/README.md`](WebGame/backend/README.md) for setup and training instructions.
+
 [![Unity](https://img.shields.io/badge/Unity-6000.4.0f1-black.svg?style=flat&logo=unity)](https://unity.com/)
 [![Python](https://img.shields.io/badge/Python-3.11-blue.svg?style=flat&logo=python)](https://python.org/)
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-Pose%20Tracking-teal.svg?style=flat)](https://developers.google.com/mediapipe)

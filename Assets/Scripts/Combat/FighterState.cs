@@ -82,6 +82,14 @@ namespace BoxingAI
             attackCooldown = 0f;
             dodgeCooldown = 0f;
             velocity = Vector3.zero;
+            previousPosition = position;
+        }
+
+        public void ResetPosition(Vector3 newPosition)
+        {
+            position = newPosition;
+            previousPosition = newPosition;
+            velocity = Vector3.zero;
         }
     }
 }

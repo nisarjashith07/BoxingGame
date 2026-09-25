@@ -58,10 +58,33 @@ namespace BoxingAI
 
         public Vector3 AttackHandPosition => punchIsLeftHand ? leftHandTarget : rightHandTarget;
         public BoxingAction CurrentPunchType => currentPunchType;
+        public bool CanStartPunch => punchPhase == PunchPhase.None;
 
         public void SetPlayerTarget(Transform target)
         {
             playerTarget = target;
+        }
+
+        public void ResetForMatch(Vector3 position, Quaternion rotation)
+        {
+            if (characterController != null && characterController.enabled)
+                characterController.enabled = false;
+            transform.SetPositionAndRotation(position, rotation);
+            if (characterController != null)
+                characterController.enabled = true;
+            desiredVelocity = Vector3.zero;
+            currentMoveSpeed = 0f;
+            punchPhase = PunchPhase.None;
+            punchTimer = 0f;
+            isDodging = false;
+            dodgeTimer = 0f;
+            isBlockingState = false;
+            ikInitialized = false;
+            if (animator != null)
+            {
+                animator.Rebind();
+                animator.Update(0f);
+            }
         }
 
         private void Awake()
