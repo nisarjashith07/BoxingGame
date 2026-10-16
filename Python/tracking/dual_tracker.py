@@ -4,6 +4,7 @@ import math
 import numpy as np
 import mediapipe as mp
 
+from concurrent.futures import ThreadPoolExecutor
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 
@@ -58,6 +59,9 @@ class DualPoseTracker:
         # Create separate landmarker instances for Front and Side views
         self.landmarker_front = vision.PoseLandmarker.create_from_options(options)
         self.landmarker_side = vision.PoseLandmarker.create_from_options(options)
+
+        # ThreadPoolExecutor for concurrent dual-camera inference across CPU cores
+        self.executor = ThreadPoolExecutor(max_workers=2)
 
         # Start non-blocking threaded video capture for zero latency
         self.cap_front = ThreadedCamera(
@@ -172,15 +176,12 @@ class DualPoseTracker:
         if side_frame is None:
             side_frame = np.zeros((480, 640, 3), dtype=np.uint8)
 
-        # Convert to RGB for MediaPipe
-        rgb_front = cv2.cvtColor(front_frame, cv2.COLOR_BGR2RGB)
-        rgb_side = cv2.cvtColor(side_frame, cv2.COLOR_BGR2RGB)
+        # Run dual-camera conversion and detection concurrently across CPU threads
+        fut_front = self.executor.submit(self._detect_single, self.landmarker_front, front_frame)
+        fut_side = self.executor.submit(self._detect_single, self.landmarker_side, side_frame)
 
-        mp_front = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_front)
-        mp_side = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_side)
-
-        res_front = self.landmarker_front.detect(mp_front)
-        res_side = self.landmarker_side.detect(mp_side)
+        res_front = fut_front.result()
+        res_side = fut_side.result()
 
         # Cache 2D landmarks for visualizer overlays
         self.latest_2d_front = res_front.pose_landmarks[0] if len(res_front.pose_landmarks) > 0 else None
@@ -451,7 +452,21 @@ class DualPoseTracker:
         if self.left_punch_state == "guard" and self.right_punch_state == "guard":
             self.punch_type = "GUARD STANCE"
 
+    @staticmethod
+    def _detect_single(landmarker, frame):
+        h, w = frame.shape[:2]
+        if w > 480:
+            target_w = 384
+            target_h = int(h * (384.0 / w))
+            small = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+        else:
+            small = frame
+        rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+        mp_img = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        return landmarker.detect(mp_img)
+
     def release(self):
+        self.executor.shutdown(wait=False)
         self.cap_front.release()
         self.cap_side.release()
         print("[Tracker] Both cameras and trackers successfully shut down.")

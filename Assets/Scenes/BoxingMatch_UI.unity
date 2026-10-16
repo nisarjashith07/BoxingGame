@@ -1899,7 +1899,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AvatarController
   ikWeight: 1
-  smoothingSpeed: 15
+  smoothingSpeed: 55
   avatarScale: 1.2
 --- !u!1 &2074580456
 GameObject:

@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 using System.Collections.Generic;
 
 [RequireComponent(typeof(Animator))]
@@ -22,10 +23,15 @@ public class AvatarController : MonoBehaviour
     [Range(0f, 1f)]
     public float ikWeight = 1.0f;
     
-    [Header("Motion Smoothing")]
+    [Header("Motion Smoothing & Speed")]
+    [Range(15f, 90f)]
+    [Tooltip("Base tracking speed. 55f gives near-instantaneous 1:1 response.")]
+    [FormerlySerializedAs("smoothingSpeed")]
+    public float baseSmoothingSpeed = 55f;
+
+    [Tooltip("Punch acceleration multiplier to eliminate IK drag during fast punches.")]
     [Range(5f, 40f)]
-    [Tooltip("Higher values respond faster to explosive punches.")]
-    public float baseSmoothingSpeed = 22f;
+    public float punchAcceleration = 20f;
 
     [Header("Avatar Scale & Reach")]
     [Tooltip("Scales the MediaPipe skeleton to match the Unity character proportions.")]
@@ -264,9 +270,9 @@ public class AvatarController : MonoBehaviour
             targetRot = Quaternion.AngleAxis(pronationAngle, forward) * targetRot;
         }
 
-        // Dynamic smoothing: punch speed increases responsiveness
+        // Dynamic smoothing: punch speed accelerates responsiveness for instant snap
         float currentSpeed = isRightArm ? RightPunchSpeed : LeftPunchSpeed;
-        float dynamicSmoothing = baseSmoothingSpeed + Mathf.Clamp(currentSpeed * 4f, 0f, 25f);
+        float dynamicSmoothing = baseSmoothingSpeed + Mathf.Clamp(currentSpeed * punchAcceleration, 0f, 65f);
 
         smoothedHandPos = Vector3.Lerp(
             smoothedHandPos == Vector3.zero ? targetPos : smoothedHandPos,

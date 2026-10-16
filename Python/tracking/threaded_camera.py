@@ -1,16 +1,17 @@
 import cv2
 import threading
 import time
+import sys
 
 
 class ThreadedCamera:
     """
-    High-performance threaded camera capture for OpenCV.
-    Runs frame capture in a background thread to prevent camera I/O from blocking
-    the pose tracking pipeline, ensuring ultra-low latency and maximum FPS.
+    Ultra-low-latency threaded camera capture for OpenCV on Windows.
+    Uses DirectShow (CAP_DSHOW) to bypass Windows Media Foundation's 3-frame buffer,
+    locking internal buffer to 1 frame for real-time VR tracking.
     """
 
-    def __init__(self, source, width=1280, height=720, name="Camera"):
+    def __init__(self, source, width=640, height=480, name="Camera"):
         self.source = source
         self.name = name
         self.width = width
@@ -27,9 +28,24 @@ class ThreadedCamera:
 
     def _init_camera(self):
         try:
-            # Handle integer indices or string URLs
-            src = int(self.source) if isinstance(self.source, str) and self.source.isdigit() else self.source
-            self.cap = cv2.VideoCapture(src)
+            # Check if source is integer camera index
+            is_index = False
+            src = self.source
+            if isinstance(src, int):
+                is_index = True
+            elif isinstance(src, str) and src.isdigit():
+                src = int(src)
+                is_index = True
+
+            # Use DirectShow on Windows for zero buffer latency
+            if is_index and sys.platform.startswith("win"):
+                self.cap = cv2.VideoCapture(src, cv2.CAP_DSHOW)
+            else:
+                self.cap = cv2.VideoCapture(src)
+
+            if not self.cap.isOpened():
+                # Fallback to default backend if DSHOW fails
+                self.cap = cv2.VideoCapture(src)
 
             if not self.cap.isOpened():
                 print(f"[{self.name}] Warning: Could not open camera source: {self.source}")
@@ -40,7 +56,8 @@ class ThreadedCamera:
             if self.height:
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
 
-            # Minimize internal buffer to 1 frame for real-time VR tracking
+            # Request high frame rate and strictly 1-frame buffer
+            self.cap.set(cv2.CAP_PROP_FPS, 60)
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
             self.ret, self.frame = self.cap.read()
@@ -48,7 +65,7 @@ class ThreadedCamera:
                 print(f"[{self.name}] Warning: Opened camera, but initial frame read failed.")
             else:
                 h, w = self.frame.shape[:2]
-                print(f"[{self.name}] Initialized successfully at {w}x{h}")
+                print(f"[{self.name}] Zero-latency capture initialized at {w}x{h}")
 
             self.running = True
             self.thread = threading.Thread(target=self._capture_loop, daemon=True)
@@ -58,15 +75,18 @@ class ThreadedCamera:
             print(f"[{self.name}] Exception while initializing camera: {e}")
 
     def _capture_loop(self):
+        # Dedicated hardware polling loop with zero sleep delay
         while self.running and self.cap is not None and self.cap.isOpened():
-            ret, frame = self.cap.read()
-            if ret and frame is not None:
-                with self.lock:
-                    self.ret = ret
-                    self.frame = frame
+            # grab() is fast hardware frame query
+            grabbed = self.cap.grab()
+            if grabbed:
+                ret, frame = self.cap.retrieve()
+                if ret and frame is not None:
+                    with self.lock:
+                        self.ret = ret
+                        self.frame = frame
             else:
-                time.sleep(0.01)
-            time.sleep(0.002)
+                time.sleep(0.005)
 
     def is_opened(self):
         return self.cap is not None and self.cap.isOpened() and self.running
@@ -76,7 +96,7 @@ class ThreadedCamera:
         with self.lock:
             if not self.ret or self.frame is None:
                 return False, None
-            return True, self.frame.copy()
+            return True, self.frame
 
     def release(self):
         self.running = False

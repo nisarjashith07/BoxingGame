@@ -64,16 +64,15 @@ class SkeletonOneEuroFilter:
     Applies independent 1€ Filters across all 33 pose landmarks.
     """
 
-    def __init__(self, min_cutoff=1.5, beta=0.08, d_cutoff=1.0, landmark_count=33):
-        # Slightly higher responsiveness (beta) for wrists and knuckles
+    def __init__(self, min_cutoff=1.5, beta=0.35, d_cutoff=1.0, landmark_count=33):
         self.filters = []
         for i in range(landmark_count):
-            if i in (15, 16, 17, 18, 19, 20, 21, 22):  # Hands / Wrists: explosive boxing punches
-                self.filters.append(OneEuroFilter(min_cutoff=1.2, beta=0.15, d_cutoff=1.0))
+            if i in (15, 16, 17, 18, 19, 20, 21, 22):  # Hands / Wrists: high beta for zero punch lag
+                self.filters.append(OneEuroFilter(min_cutoff=1.6, beta=0.45, d_cutoff=1.0))
             elif i in (13, 14):  # Elbows
-                self.filters.append(OneEuroFilter(min_cutoff=1.5, beta=0.10, d_cutoff=1.0))
-            else:  # Head, Shoulders, Torso: ultra-smooth stability
-                self.filters.append(OneEuroFilter(min_cutoff=1.0, beta=0.04, d_cutoff=1.0))
+                self.filters.append(OneEuroFilter(min_cutoff=1.8, beta=0.25, d_cutoff=1.0))
+            else:  # Head, Shoulders, Torso: smooth stability
+                self.filters.append(OneEuroFilter(min_cutoff=1.2, beta=0.08, d_cutoff=1.0))
 
     def filter_skeleton(self, landmarks, t):
         result = []
