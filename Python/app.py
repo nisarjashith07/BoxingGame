@@ -1,29 +1,69 @@
 import cv2
+import sys
+from pathlib import Path
 
-from tracking.tracker import PoseTracker
-from tracking.visualizer import PoseVisualizer
+# Ensure Python directory is in sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from tracking.dual_tracker import DualPoseTracker
+from tracking.visualizer import DualPoseVisualizer
 from networking.udp_sender import UDPSender
 
-tracker = PoseTracker()
-sender = UDPSender()
 
-visualizer = PoseVisualizer()
+def main():
+    print("=" * 60)
+    print("  STARTING VR BOXING DUAL-CAMERA TRACKING PIPELINE")
+    print("  Front Camera: PC Webcam (Lateral + Height)")
+    print("  Side Camera:  Phone Cam on Right (Optical Punch Depth)")
+    print("  Hotkeys:")
+    print("    [Q] / [ESC] - Quit")
+    print("    [M]         - Toggle Side Camera Horizontal Mirror")
+    print("    [R]         - Rotate Side Camera 90 degrees")
+    print("=" * 60)
 
-while True:
+    tracker = DualPoseTracker()
+    sender = UDPSender()
+    visualizer = DualPoseVisualizer()
 
-    frame, pose = tracker.get_pose()
+    window_name = "VR Boxing AI - Dual Camera MoCap"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, 1280, 720)
 
-    if frame is None:
-        break
+    try:
+        while True:
+            front_frame, side_frame, pose = tracker.get_dual_pose()
 
-    sender.send(pose)
-    frame = visualizer.draw(frame, pose)
+            if front_frame is None and side_frame is None:
+                print("No camera feeds available. Exiting...")
+                break
 
-    cv2.imshow("Boxing AI", frame)
+            # Send 3D fused pose to Unity via UDP
+            if pose is not None:
+                sender.send(pose)
 
-    if cv2.waitKey(1) == 27:
-        break
+            # Render dual camera telemetry dashboard
+            dashboard = visualizer.render_dashboard(front_frame, side_frame, pose, tracker)
 
-tracker.release()
+            cv2.imshow(window_name, dashboard)
 
-cv2.destroyAllWindows()
+            key = cv2.waitKey(1) & 0xFF
+            if key == 27 or key == ord('q') or key == ord('Q'):
+                print("Exit requested by user.")
+                break
+            elif key == ord('m') or key == ord('M'):
+                tracker.toggle_side_flip()
+            elif key == ord('r') or key == ord('R'):
+                tracker.rotate_side_90()
+            elif key == ord('c') or key == ord('C'):
+                tracker.start_calibration()
+
+    except KeyboardInterrupt:
+        print("\nPipeline interrupted by user.")
+    finally:
+        tracker.release()
+        cv2.destroyAllWindows()
+        print("Pipeline closed cleanly.")
+
+
+if __name__ == "__main__":
+    main()

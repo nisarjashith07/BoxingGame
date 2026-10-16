@@ -1,38 +1,60 @@
-# AI Boxing Game — MediaPipe & Unity 6
+# AI Boxing Game — Dual-Camera 3D MoCap & Combat System (Unity 6)
 
 [![Unity](https://img.shields.io/badge/Unity-6000.4.0f1-black.svg?style=flat&logo=unity)](https://unity.com/)
-[![Python](https://img.shields.io/badge/Python-3.11-blue.svg?style=flat&logo=python)](https://python.org/)
-[![MediaPipe](https://img.shields.io/badge/MediaPipe-Pose%20Tracking-teal.svg?style=flat)](https://developers.google.com/mediapipe)
+[![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.14-blue.svg?style=flat&logo=python)](https://python.org/)
+[![MediaPipe](https://img.shields.io/badge/MediaPipe-Dual%20Camera%203D-teal.svg?style=flat)](https://developers.google.com/mediapipe)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6.svg?style=flat&logo=windows)](https://microsoft.com)
 
-A real-time, AI-driven 3D boxing game powered by **MediaPipe Pose Tracking**, **Python**, and **Unity 6 (Universal Render Pipeline)**. 
+A real-time, AI-driven 3D boxing game powered by **Dual-Camera 3D Pose Tracking** (MediaPipe Tasks API), **Python**, and **Unity 6 (Universal Render Pipeline)**. 
 
-Play by throwing real punches and holding up your hands in front of your webcam, or play using standard keyboard and mouse controls with dedicated boxing footwork and combat mechanics.
+Play by throwing real punches and slipping in front of your dual-camera setup (PC webcam + phone on your right), or play using keyboard and mouse controls with dedicated boxing footwork and combat mechanics.
 
 ---
 
-## Table of Contents
-- [Key Features](#key-features)
-- [How to Play & Controls](#how-to-play--controls)
-  - [Keyboard & Mouse Controls](#keyboard--mouse-controls)
-  - [Webcam Motion Tracking](#webcam-motion-tracking)
-- [Architecture](#architecture)
-- [Project Structure](#project-structure)
-- [Installation & Getting Started](#installation--getting-started)
-  - [1. Unity Setup (Game Client)](#1-unity-setup-game-client)
-  - [2. Python Setup (Webcam Pose Server)](#2-python-setup-webcam-pose-server)
-- [Combat Mechanics & Game Systems](#combat-mechanics--game-systems)
-  - [Player Footwork & Movement](#player-footwork--movement)
-  - [Punch & Guard Detection](#punch--guard-detection)
-  - [AI Opponent Brain](#ai-opponent-brain)
-  - [Combat HUD & Visual Feedback](#combat-hud--visual-feedback)
-- [Troubleshooting & FAQ](#troubleshooting--faq)
+## Dual-Camera Architecture & 3D Sensor Fusion
+
+```text
+  [Front Camera: PC Webcam]                    [Side Camera: Phone on Right]
+       (Facing Player)                              (Facing Player's Right)
+              │                                                │
+       Captures: X (Lateral)                            Captures: Z (Forward Punch Depth)
+                 Y (Vertical)                                     Y (Vertical Height)
+              └─────────────────────┬──────────────────────────┘
+                                    ▼
+                     [DualPoseTracker (Python)]
+                     - Multi-threaded zero-latency capture
+                     - 1€ Filter (One Euro Filter: 0-latency, 0-jitter)
+                     - Rigid Anatomical Bone Length Constraints
+                     - Real-time Punch Speed & State Analytics
+                                    │
+                            UDP Socket (5055)
+                                    ▼
+                      [Unity 6 AvatarController]
+                     - Full 3D Humanoid IK Rig
+                     - Forward Punch Reach Multiplier & Reach Clamping
+                     - Velocity-Adaptive Dynamic Smoothing
+                     - Torso Dodging (Bob, Weave, and Slip)
+                                    │
+                                    ▼
+                      [Combat & Match System]
+                     - BoxingPlayerController.cs (Lock-On WASD Footwork)
+                     - PunchDetector.cs & BoxingEnvironment.cs
+                     - AIOpponentBrain.cs & CombatHUD.cs
+```
+
+### Why Dual Camera?
+- **Single Camera Limitation:** When punching directly towards a front webcam, the fist foreshortens. MediaPipe's monocular depth heuristic compresses or jitters, causing punches to under-extend or snap back.
+- **Dual Camera Advantage:** From the side camera (positioned on the player's right), a forward punch moves horizontally across the camera's sensor. This transforms depth estimation into a direct 2D optical measurement, providing millimeter-accurate punch extension and full arm lockout!
 
 ---
 
 ## Key Features
 
-- **Webcam Motion Tracking (No VR Required)**: Uses MediaPipe's 33-point BlazePose model at 30+ FPS to track shoulders, elbows, wrists, and guard position in real time.
+- **Dual-Camera 3D Motion Tracking (No VR Required)**:
+  - Fuses PC front webcam (lateral/vertical) and phone side camera (punch reach/depth).
+  - 1€ Filter (One Euro Filter) eliminates micro-jitter in guard stance while providing zero-latency punches.
+  - Rigid anatomical bone constraints prevent rubber-arm distortion.
+  - Interactive 1-click calibration (`Press [C]`) to match your exact arm reach.
 - **Dedicated Boxing Footwork**: Lock-on boxer movement system. Move forward to step into the pocket, retreat to slip back, and circle/strafe around the opponent while maintaining stance.
 - **Adaptive AI Boxer**: Multi-tier AI opponent (Easy, Medium, Hard) driven by a Utility/FSM decision engine that reads player distance, attack intent, and stamina to trade punches, slip, and counter.
 - **Full Punch Arsenal**: Left Jabs, Right Crosses, Left Hooks, Right Hooks, and High Guard Defense with procedural inverse kinematics (IK) bone animation.
@@ -41,6 +63,7 @@ Play by throwing real punches and holding up your hands in front of your webcam,
   - Overhead 3D health bar directly pinned above the AI opponent in world/screen space.
   - 3D floating damage popups (`-14 CROSS!`, `-8 JAB!`, `BLOCKED -2`) that pop off impact locations.
   - Dynamic hit banner and match result overlays (Knockout / Victory / Defeat).
+- **Match Timer**: 3-minute round clock with round control and match management.
 - **Procedural Dynamic Audio**: Synthesized impact thuds and glove block audio generated at runtime via `AudioClip.Create` without external audio asset dependencies.
 - **Zero-Setup Bootstrapper**: Automated scene initialization (`CombatBootstrapper`) that configures the opponent, player controller, UI canvas, and combat environment on Play Mode.
 
@@ -48,9 +71,20 @@ Play by throwing real punches and holding up your hands in front of your webcam,
 
 ## How to Play & Controls
 
-The game can be played immediately with **Keyboard & Mouse** or with full **Webcam Pose Tracking**.
+### Option A: Dual-Camera Motion Tracking (Real Punches)
+1. Position your PC webcam in front of you.
+2. Position your phone camera to your **right side** at $\approx 90^\circ$, facing your right profile.
+3. Launch `app.py`:
+   ```bash
+   .\Python\venv\Scripts\python.exe Python\app.py
+   ```
+4. **Hotkeys in Tracking Window:**
+   - **`[C]`**: Run 2.5s Calibration while holding your boxing guard stance.
+   - **`[M]`**: Toggle horizontal mirror for the side camera (for front selfie cameras).
+   - **`[R]`**: Rotate side camera feed by 90° (for portrait mode mounting).
+   - **`[Q]` / `[ESC]`**: Quit cleanly.
 
-### Keyboard & Mouse Controls
+### Option B: Keyboard & Mouse Controls
 
 | Key / Input | Action | In-Game Behavior |
 |---|---|---|
@@ -65,44 +99,6 @@ The game can be played immediately with **Keyboard & Mouse** or with full **Webc
 | **`Space`** / **`B`** *(Hold)* | **High Guard** | Raises gloves to chin; reduces incoming damage by 75% |
 | **`Escape`** | **Cursor Lock** | Toggle mouse cursor lock / release |
 
-### Webcam Motion Tracking
-
-When running `Python/app.py`, stand in view of your webcam:
-- **Jabs & Crosses**: Extend your left or right fist toward the camera with speed.
-- **Hooks**: Swing your arm horizontally across your torso.
-- **High Guard**: Bring both hands up to cover your chin and face.
-
----
-
-## Architecture
-
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                        WEBCAM MOTION PIPELINE                          │
-│                                                                        │
-│  Webcam (30+ FPS)                                                      │
-│    └─→ Python MediaPipe Pose Tracker (33 Landmarks)                    │
-│          └─→ UDP JSON Stream (localhost:5055)                          │
-│                └─→ Unity UDPReceiver (Background Worker Thread)        │
-│                      └─→ PoseManager.cs (Dispatches Main Thread Data)  │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                         COMBAT & MATCH PIPELINE                        │
-│                                                                        │
-│  Player Input / Pose                                                   │
-│    ├─→ BoxingPlayerController.cs (Lock-On WASD Footwork)               │
-│    └─→ PunchDetector.cs (Velocity, Extension & Guard Detection)        │
-│          │                                                             │
-│          ▼                                                             │
-│  BoxingEnvironment.cs (Match Engine & Hit Registration)                │
-│    ├─→ AIOpponentBrain.cs & AIFighterController.cs (AI Combat Loop)   │
-│    ├─→ FighterState.cs (Health, Stamina & Defense Calculations)        │
-│    └─→ CombatHUD.cs (Screen HUD, 3D Overhead Bar, Floating Numbers)    │
-└────────────────────────────────────────────────────────────────────────┘
-```
-
 ---
 
 ## Project Structure
@@ -116,8 +112,8 @@ BoxingGame/
 │   │
 │   ├── Scripts/
 │   │   ├── AI/                          # AI Decision & Behavior System
-│   │   │   ├── BoxingAction.cs          # 12-action combat enumeration
-│   │   │   ├── BoxingObservation.cs     # 17-field environmental observation struct
+│   │   │   ├── BoxingAction.cs          # Combat action enumeration
+│   │   │   ├── BoxingObservation.cs     # Environmental observation struct
 │   │   │   ├── AIOpponentProfile.cs     # ScriptableObject difficulty profiles
 │   │   │   ├── OpponentPatternMemory.cs # Adaptive opponent memory & counters
 │   │   │   ├── AIOpponentBrain.cs       # Utility/FSM decision engine
@@ -136,7 +132,7 @@ BoxingGame/
 │   │   │
 │   │   ├── Data/                        # Data Contracts
 │   │   │   ├── Landmark.cs              # Individual landmark coordinates & visibility
-│   │   │   └── PoseData.cs              # Full 33-landmark pose frame payload
+│   │   │   └── PoseData.cs              # 33-landmark payload + punch telemetry
 │   │   │
 │   │   ├── Managers/                    # Game Loop Managers
 │   │   │   ├── PoseManager.cs           # UDP packet parsing & dispatch
@@ -145,8 +141,8 @@ BoxingGame/
 │   │   ├── Networking/                  # Networking
 │   │   │   └── UDPReceiver.cs           # Threaded UDP socket receiver (Port 5055)
 │   │   │
-│   │   ├── Visualization/              # 3D Avatar & Skeleton
-│   │   │   ├── AvatarController.cs      # Humanoid IK arm positioning
+│   │   ├── Visualization/               # 3D Avatar & Skeleton
+│   │   │   ├── AvatarController.cs      # Humanoid IK arm positioning & torso dodge
 │   │   │   ├── SkeletonVisualizer.cs    # 33-point debug landmark visualizer
 │   │   │   └── Bone.cs                  # Procedural bone cylinder connector
 │   │   │
@@ -157,99 +153,24 @@ BoxingGame/
 │   └── StarterAssets/                   # Character rigs and animation blend trees
 │
 ├── Python/
-│   ├── app.py                           # Webcam tracking entry point
-│   ├── config.py                        # Camera indices, resolution & UDP port
+│   ├── app.py                           # Dual camera tracking entry point
+│   ├── config.py                        # Dual camera indices, resolution & fusion settings
 │   ├── requirements.txt                 # Python dependencies
 │   ├── data/
 │   │   └── pose_data.py                 # Dataclasses matching C# contract
 │   ├── models/
 │   │   └── pose_landmarker_full.task    # Google MediaPipe Pose Landmarker model
 │   ├── networking/
-│   │   └── udp_sender.py               # JSON socket streamer over UDP
+│   │   └── udp_sender.py                # JSON socket streamer over UDP
 │   └── tracking/
-│       ├── tracker.py                   # MediaPipe pose extraction pipeline
-│       └── visualizer.py               # Debug OpenCV frame overlay
+│       ├── dual_tracker.py              # 3D multi-view stereoscopic fusion & punch analytics
+│       ├── threaded_camera.py           # Zero-latency threaded frame grabber
+│       ├── one_euro_filter.py           # One-Euro Filter (0 latency, 0 jitter)
+│       ├── tracker.py                   # Backward-compatible tracker export
+│       └── visualizer.py                # Real-time telemetry dashboard & calibration UI
 │
 └── README.md
 ```
-
----
-
-## Installation & Getting Started
-
-### 1. Unity Setup (Game Client)
-
-1. Open **Unity Hub**.
-2. Click **Add** and select the `BoxingGame/` project folder.
-3. Open the project with **Unity 6 (6000.4.0f1 or newer)**.
-4. Open `Assets/Scenes/SampleScene.unity` or `Assets/Scenes/BoxingMatch_UI.unity`.
-5. Press **Play ▶**.
-   - `CombatBootstrapper` automatically configures the opponent, wires player controls, and generates the complete HUD.
-   - You can immediately fight using **WASD** and **Mouse / J, K, H, L**.
-
-### 2. Python Setup (Webcam Pose Server)
-
-To play using your webcam and physical motion:
-
-1. Open a terminal in the `Python/` directory:
-   ```bash
-   cd Python
-   ```
-2. Create and activate a virtual environment:
-   ```bash
-   python -m venv venv
-   # On Windows:
-   venv\Scripts\activate
-   # On Linux/macOS:
-   source venv/bin/activate
-   ```
-3. Install required packages:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Start the webcam pose tracker:
-   ```bash
-   python app.py
-   ```
-5. With `app.py` running in the background, enter Play Mode in Unity. Your physical movements will stream directly to your avatar over UDP port `5055`.
-
----
-
-## Combat Mechanics & Game Systems
-
-### Player Footwork & Movement
-Unlike generic third-person controllers that spin 180° away when walking backwards, `BoxingPlayerController`:
-- Always faces the opponent (lock-on boxing stance).
-- Employs tight footwork speeds (advance: 1.8 m/s, retreat: 1.4 m/s, strafe: 1.5 m/s).
-- Uses distance clamping (< 1.15m) to prevent clipping through or walking past the opponent.
-- Locks locomotion animation to a walking blend tree, avoiding running animations.
-
-### Punch & Guard Detection
-- **Punch Detection**: Evaluates wrist velocity (> 0.8 units/s) and arm extension (> 1.15x resting arm length) to identify straight punches (jabs/crosses) vs. lateral swings (hooks).
-- **High Guard**: Evaluates the distance between the wrists and the chin/nose. When hands are raised to face level, guard level transitions to 1.0 (75% damage reduction).
-- **Punch Window**: Punches remain active for a 0.20s impact window, then cleanly reset to allow rapid combinations.
-
-### AI Opponent Brain
-- **Stance & Pocket Management**: Within attack range (< 1.65m), the AI plants its feet, trades punches, blocks incoming strikes, and counters recovery windows.
-- **Difficulty Tiers**:
-  - **Easy**: Lower aggression (0.65), generous reaction windows, single punches.
-  - **Medium**: Balanced aggression (0.80), 2-3 punch combinations, reactive blocking.
-  - **Hard**: Relentless pressure (0.90), rapid combinations, precise anticipation, and active slipping.
-
-### Combat HUD & Visual Feedback
-- **Live Numeric HP**: Top player and opponent bars feature bold `100 / 100 HP` numeric readouts.
-- **Overhead 3D Bar**: A floating health bar hovers right over the opponent's head in world space.
-- **3D Floating Damage Numbers**: Pop off the point of impact on every punch (`-14 CROSS!`, `-8 JAB!`, `BLOCKED -2`).
-- **Hit Flash**: The opponent flashes white/red for 0.12s on hit impact.
-
----
-
-## Troubleshooting & FAQ
-
-- **Punches aren't registering with keyboard**: Click inside the Unity Game view window to ensure the window has focus. Cursor lock will engage. Press `Escape` to toggle cursor lock.
-- **Python server fails to connect**: Ensure port `5055` is not blocked by Windows Firewall. Both Unity and Python stream locally on `127.0.0.1:5055`.
-- **Webcam not detected**: Check `Python/config.py` and adjust `CAMERA_INDEX` (default is `0` for the primary webcam).
-- **Unity compilation**: Run `dotnet build Assembly-CSharp.csproj` from the project root to verify C# build status.
 
 ---
 
