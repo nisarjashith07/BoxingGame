@@ -20,6 +20,14 @@ namespace BoxingAI
 
         public static void EnsureCombatSystem()
         {
+            string sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+            // Solo Camera Testing scene check: do not spawn opponent or combat HUD
+            if (sceneName.Contains("Solo") || sceneName.Contains("CameraTest") || sceneName.Contains("SampleScene") || Object.FindAnyObjectByType<SoloCameraTestManager>() != null)
+            {
+                Debug.Log($"[CombatBootstrapper] Active scene '{sceneName}' is in Solo Testing Mode. Opponent and combat match will not be spawned.");
+                return;
+            }
+
             // 1. Find Player
             AvatarController playerAvatar = Object.FindAnyObjectByType<AvatarController>();
             Transform playerTransform = playerAvatar != null
