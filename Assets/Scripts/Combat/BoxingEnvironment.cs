@@ -18,7 +18,12 @@ namespace BoxingAI
         [SerializeField] private PunchDetector punchDetector;
         [SerializeField] private AIFighterController aiFighter;
         [SerializeField] private AIOpponentController aiOpponent;
+        [SerializeField] private RLOpponentController rlOpponent;
         [SerializeField] private CombatSettings settings;
+
+        [Header("AI Brain Selection")]
+        [Tooltip("If true, drives the AI opponent using the trained Deep RL policy network. If false, uses the scripted FSM brain.")]
+        [SerializeField] private bool useRLBrain = true;
 
         [Header("UI")]
         [SerializeField] private CombatHUD combatHUD;
@@ -71,6 +76,11 @@ namespace BoxingAI
             if (aiOpponent == null)
                 aiOpponent = FindAnyObjectByType<AIOpponentController>();
 
+            if (rlOpponent == null && aiFighter != null)
+                rlOpponent = aiFighter.GetComponent<RLOpponentController>();
+            if (rlOpponent == null)
+                rlOpponent = FindAnyObjectByType<RLOpponentController>();
+
             if (combatHUD == null)
                 combatHUD = FindAnyObjectByType<CombatHUD>();
 
@@ -94,9 +104,23 @@ namespace BoxingAI
             MatchTimer timer,
             Transform player)
         {
+            Initialize(detector, fighter, opponent, null, combatSettings, hud, timer, player);
+        }
+
+        public void Initialize(
+            PunchDetector detector,
+            AIFighterController fighter,
+            AIOpponentController opponent,
+            RLOpponentController rlController,
+            CombatSettings combatSettings,
+            CombatHUD hud,
+            MatchTimer timer,
+            Transform player)
+        {
             punchDetector = detector;
             aiFighter = fighter;
             aiOpponent = opponent;
+            rlOpponent = rlController;
             settings = combatSettings;
             combatHUD = hud;
             matchTimer = timer;
@@ -107,7 +131,7 @@ namespace BoxingAI
         {
             AutoFindReferences();
 
-            // Configure AI difficulty
+            // Configure AI difficulty for scripted brain
             if (aiOpponent != null)
                 aiOpponent.SetDifficulty(difficulty);
 
@@ -127,6 +151,9 @@ namespace BoxingAI
             if (aiOpponent != null)
                 aiOpponent.ResetBrain();
 
+            if (rlOpponent != null)
+                rlOpponent.ResetBrain();
+
             if (matchTimer != null)
                 matchTimer.ResetTimer();
 
@@ -134,7 +161,8 @@ namespace BoxingAI
             aiPunchProcessed = false;
             matchActive = true;
 
-            Debug.Log($"[Boxing] Match started — Difficulty: {difficulty}");
+            string brainType = useRLBrain && rlOpponent != null ? "Deep RL (Trained Policy)" : $"Scripted ({difficulty})";
+            Debug.Log($"[Boxing] Match started — AI Brain: {brainType}");
         }
 
         // --- Game Loop ---
@@ -182,13 +210,25 @@ namespace BoxingAI
             }
 
             // --- 3. AI Decision ---
-            if (aiOpponent != null && aiFighter != null && punchDetector != null)
+            if (aiFighter != null && punchDetector != null)
             {
                 float roundTime01 = matchTimer != null ? matchTimer.NormalizedTimeRemaining : 1f;
                 BoxingObservation observation = ObservationBuilder.Build(
                     aiState, playerState, punchDetector, aiFighter, roundTime01);
 
-                BoxingAction action = aiOpponent.Evaluate(observation);
+                BoxingAction action;
+                if (useRLBrain && rlOpponent != null)
+                {
+                    action = rlOpponent.Evaluate(observation);
+                }
+                else if (aiOpponent != null)
+                {
+                    action = aiOpponent.Evaluate(observation);
+                }
+                else
+                {
+                    action = BoxingAction.Idle;
+                }
 
                 // --- 4. Execute AI Action ---
                 aiFighter.ExecuteAction(action);

@@ -45,11 +45,28 @@ namespace BoxingAI
 
         private BoxingAction ChooseAction(BoxingObservation o)
         {
-            // Defensive reaction to incoming player punches
-            if (o.incomingAttack)
+            // --- Stamina-based recovery retreat ---
+            if (o.selfStamina01 < 0.20f && profile.staminaConservation > 0.45f)
+            {
+                if (ScoreRoll(profile.staminaConservation))
+                    return ChooseRecoveryMovement(o);
+            }
+
+            // --- Anticipate incoming attack using pattern memory ---
+            float anticipatedThreat = o.opponentAttackIntent01
+                + memory.AggressionEstimate * profile.adaptation * profile.anticipation;
+
+            bool threatened = o.incomingAttack
+                || (profile.anticipation > 0.4f && anticipatedThreat > 0.55f);
+
+            // --- Defensive reaction to incoming / anticipated player punches ---
+            if (threatened && (o.incomingAttack || ScoreRoll(profile.anticipation * 0.6f)))
             {
                 float defensivePressure = profile.defense * 1.3f;
                 defensivePressure += profile.anticipation * 0.35f;
+                // Hard opponents exploit low blocker tendency
+                if (memory.BlockRate < 0.15f && profile.adaptation > 0.5f)
+                    defensivePressure -= 0.12f;
 
                 if (o.selfCanDodge && ScoreRoll(defensivePressure * 0.7f))
                     return ChooseDodge(o);
@@ -58,27 +75,52 @@ namespace BoxingAI
                     return BoxingAction.Block;
             }
 
-            // In boxing range (within ~1.65m): Stand ground, ATTACK, or guard!
+            // --- In boxing range: stand ground, attack, or guard ---
             if (o.distance <= profile.attackDistance)
             {
-                // Counter attack or normal attack
+                // Punish recovering opponent (counter window)
+                if (o.opponentRecovering && o.selfCanAttack)
+                {
+                    float punishChance = profile.counterSkill + profile.aggression * 0.4f;
+                    if (ScoreRoll(punishChance))
+                        return ChooseAttack(o, punish: true);
+                }
+
+                // Normal attack decision influenced by opponent pattern memory
                 if (o.selfCanAttack)
                 {
                     float attackChance = profile.aggression;
-                    if (o.opponentRecovering) attackChance += 0.25f;
+                    // Exploit opponent who rarely guards
+                    if (memory.BlockRate < 0.25f && profile.adaptation > 0.3f)
+                        attackChance += 0.15f * profile.adaptation;
+                    // Back off if opponent is very aggressive and our stamina is low
+                    if (memory.AggressionEstimate > 0.7f && o.selfStamina01 < 0.4f)
+                        attackChance -= 0.20f * profile.staminaConservation;
 
                     if (ScoreRoll(attackChance))
-                        return ChooseAttack(o, o.opponentRecovering);
+                        return ChooseAttack(o, punish: false);
                 }
 
-                // If on cooldown or low stamina: hold guard or stay in idle stance (never run!)
-                return o.selfCanBlock && ScoreRoll(profile.defense * 0.6f)
-                    ? BoxingAction.Block
-                    : BoxingAction.Idle;
+                // Retreat if pushed into retreat threshold
+                if (o.distance < profile.retreatDistance && profile.mobility > 0.4f)
+                    return ChooseRetreat(o);
+
+                // Hold guard
+                if (o.selfCanBlock && ScoreRoll(profile.defense * 0.6f))
+                    return BoxingAction.Block;
+
+                // Lateral footwork to open angles
+                if (profile.mobility > 0.55f && ScoreRoll(profile.mobility * 0.35f))
+                    return UnityEngine.Random.value < 0.5f ? BoxingAction.StrafeLeft : BoxingAction.StrafeRight;
+
+                return BoxingAction.Idle;
             }
 
-            // Outside range (> 1.65m): Walk forward into the pocket
-            return BoxingAction.MoveForward;
+            // --- Outside range: close the gap intelligently ---
+            if (o.distance > profile.preferredDistance + 0.5f)
+                return ChooseApproach(o);
+
+            return ChooseMaintain(o);
         }
 
         private BoxingAction ChooseAttack(BoxingObservation o, bool punish)
@@ -114,6 +156,10 @@ namespace BoxingAI
 
         private BoxingAction ChooseApproach(BoxingObservation o)
         {
+            // Occasionally strafe while approaching for unpredictability
+            if (profile.mobility > 0.6f && UnityEngine.Random.value < profile.mobility * 0.2f)
+                return UnityEngine.Random.value < 0.5f ? BoxingAction.StrafeLeft : BoxingAction.StrafeRight;
+
             return BoxingAction.MoveForward;
         }
 

@@ -61,6 +61,7 @@ namespace BoxingAI
             // 3. Ensure AI Fighter
             AIFighterController aiFighter = Object.FindAnyObjectByType<AIFighterController>();
             AIOpponentController aiOpponent = Object.FindAnyObjectByType<AIOpponentController>();
+            RLOpponentController rlOpponent = Object.FindAnyObjectByType<RLOpponentController>();
 
             if (aiFighter == null)
             {
@@ -124,7 +125,10 @@ namespace BoxingAI
                     aiOpponent = aiGo.AddComponent<AIOpponentController>();
                     aiOpponent.SetDifficulty(AIDifficulty.Medium);
 
-                    Debug.Log("[CombatBootstrapper] Created AIFighter opponent in front of player.");
+                    rlOpponent = aiGo.AddComponent<RLOpponentController>();
+                    rlOpponent.InitializeModel();
+
+                    Debug.Log("<color=green>[CombatBootstrapper] Created AIFighter opponent with trained Deep RL Brain.</color>");
                 }
                 else
                 {
@@ -133,6 +137,10 @@ namespace BoxingAI
 
                     aiOpponent = aiGo.GetComponent<AIOpponentController>();
                     if (aiOpponent == null) aiOpponent = aiGo.AddComponent<AIOpponentController>();
+
+                    rlOpponent = aiGo.GetComponent<RLOpponentController>();
+                    if (rlOpponent == null) rlOpponent = aiGo.AddComponent<RLOpponentController>();
+                    rlOpponent.InitializeModel();
                 }
             }
 
@@ -166,7 +174,7 @@ namespace BoxingAI
 
             // Wire everything
             MatchTimer timer = Object.FindAnyObjectByType<MatchTimer>();
-            env.Initialize(punchDetector, aiFighter, aiOpponent, settings, hud, timer, playerTransform);
+            env.Initialize(punchDetector, aiFighter, aiOpponent, rlOpponent, settings, hud, timer, playerTransform);
             env.StartMatch();
 
             Debug.Log("<color=green>[CombatBootstrapper] Boxing Combat System fully bootstrapped and running!</color>");
