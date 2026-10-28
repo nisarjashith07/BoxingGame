@@ -1,15 +1,18 @@
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 
 namespace BoxingAI
 {
     /// <summary>
     /// Main combat orchestrator. Each frame:
-    /// 1. Reads player state from PunchDetector (MediaPipe landmarks + manual inputs)
+    /// 1. Reads player state from PunchDetector (timestamped MediaPipe landmarks + manual inputs)
     /// 2. Builds BoxingObservation from live game state
-    /// 3. Feeds observation to AIOpponentController → gets BoxingAction
-    /// 4. Executes action on AIFighterController
+    /// 3. Feeds observation to RLOpponentController / AIOpponentController → gets BoxingAction
+    /// 4. Executes action on AIFighterController with event-based stamina & cooldown enforcement
     /// 5. Performs hit detection (player→AI and AI→player)
-    /// 6. Applies damage/stamina and updates HUD with audio/visual feedback
+    /// 6. Applies damage and updates HUD with audio/visual feedback
     /// 7. Checks win/loss conditions
     /// </summary>
     public class BoxingEnvironment : MonoBehaviour
@@ -23,7 +26,7 @@ namespace BoxingAI
 
         [Header("AI Brain Selection")]
         [Tooltip("If true, drives the AI opponent using the trained Deep RL policy network. If false, uses the scripted FSM brain.")]
-        [SerializeField] private bool useRLBrain = true;
+        [SerializeField] private bool useRLBrain = false;
 
         [Header("UI")]
         [SerializeField] private CombatHUD combatHUD;
@@ -43,7 +46,6 @@ namespace BoxingAI
         // Hit detection deduplication
         private bool playerPunchProcessed;
         private bool aiPunchProcessed;
-        private BoxingAction lastAIAction = BoxingAction.Idle;
 
         private bool matchActive;
 
@@ -145,8 +147,22 @@ namespace BoxingAI
         /// <summary>Starts or restarts the match.</summary>
         public void StartMatch()
         {
+            if (playerTransform != null)
+                playerState.position = playerTransform.position;
+            if (aiFighter != null)
+                aiState.position = aiFighter.transform.position;
+
             playerState.Reset();
             aiState.Reset();
+
+            if (punchDetector != null)
+            {
+                punchDetector.ResetDetector();
+                punchDetector.SetFighterState(playerState);
+            }
+
+            if (aiFighter != null)
+                aiFighter.ResetFighter();
 
             if (aiOpponent != null)
                 aiOpponent.ResetBrain();
@@ -161,6 +177,9 @@ namespace BoxingAI
             aiPunchProcessed = false;
             matchActive = true;
 
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+
             string brainType = useRLBrain && rlOpponent != null ? "Deep RL (Trained Policy)" : $"Scripted ({difficulty})";
             Debug.Log($"[Boxing] Match started — AI Brain: {brainType}");
         }
@@ -169,7 +188,17 @@ namespace BoxingAI
 
         private void Update()
         {
-            if (!matchActive) return;
+            if (!matchActive)
+            {
+#if ENABLE_INPUT_SYSTEM
+                if (Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame)
+                    StartMatch();
+#else
+                if (Input.GetKeyDown(KeyCode.R))
+                    StartMatch();
+#endif
+                return;
+            }
 
             // --- Win/Loss Check ---
             if (!playerState.IsAlive)
@@ -190,7 +219,7 @@ namespace BoxingAI
                 return;
             }
 
-            // --- 1. Process Player Pose ---
+            // --- 1. Process Player Pose (idempotent per camera frame ID) ---
             if (punchDetector != null)
             {
                 PoseData pose = PoseManager.LatestPose;
@@ -202,11 +231,17 @@ namespace BoxingAI
             UpdatePlayerState();
             UpdateAIState();
 
-            // Tick cooldowns and stamina regen
+            // Tick cooldowns, stamina regen, and root-position velocity
             if (settings != null)
             {
                 playerState.Tick(Time.deltaTime, settings.staminaRegenRate, settings.blockStaminaDrain);
                 aiState.Tick(Time.deltaTime, settings.staminaRegenRate, settings.blockStaminaDrain);
+            }
+
+            // Blend upper-body camera slip velocity if player is standing stationary in camera mode
+            if (punchDetector != null && punchDetector.HasActiveTracking && playerState.velocity.sqrMagnitude < 0.001f)
+            {
+                playerState.velocity = punchDetector.PlayerVelocity;
             }
 
             // --- 3. AI Decision ---
@@ -230,18 +265,8 @@ namespace BoxingAI
                     action = BoxingAction.Idle;
                 }
 
-                // --- 4. Execute AI Action ---
-                aiFighter.ExecuteAction(action);
-
-                // Drain AI stamina for costly actions only on initiation
-                if (settings != null && action != lastAIAction)
-                {
-                    if (action >= BoxingAction.Jab && action <= BoxingAction.HookRight)
-                        aiState.DrainStamina(settings.punchStaminaCost);
-                    else if (action == BoxingAction.DodgeLeft || action == BoxingAction.DodgeRight)
-                        aiState.DrainStamina(settings.dodgeStaminaCost);
-                }
-                lastAIAction = action;
+                // --- 4. Execute AI Action (event-based stamina & cooldowns inside AIFighterController) ---
+                aiFighter.ExecuteAction(action, aiState);
             }
 
             // --- 5. Hit Detection ---
@@ -263,7 +288,6 @@ namespace BoxingAI
 
             if (punchDetector != null)
             {
-                playerState.velocity = punchDetector.PlayerVelocity;
                 playerState.guard = punchDetector.GuardLevel01;
                 playerState.isBlocking = punchDetector.IsGuarding;
                 playerState.isAttacking = punchDetector.IsPunching;
@@ -277,7 +301,7 @@ namespace BoxingAI
             {
                 aiState.position = aiFighter.transform.position;
                 aiState.isBlocking = aiFighter.IsBlocking;
-                aiState.isAttacking = aiFighter.IsAttacking;
+                aiState.isAttacking = aiFighter.IsCommittedToAttack;
                 aiState.isRecovering = aiFighter.IsRecovering;
                 aiState.guard = aiFighter.IsBlocking ? 1f : 0f;
             }
@@ -294,28 +318,40 @@ namespace BoxingAI
             // --- Player → AI ---
             if (punchDetector.IsPunching && !playerPunchProcessed)
             {
-                Vector3 aiTorso = aiFighter.transform.position + Vector3.up * 1.1f;
-                float leftDist = Vector3.Distance(punchDetector.LeftWristPosition, aiTorso);
-                float rightDist = Vector3.Distance(punchDetector.RightWristPosition, aiTorso);
-                float closestHand = Mathf.Min(leftDist, rightDist);
-
-                // Hits connect if punching hand reaches AI or fighters are in close pocket range
-                if (closestHand < settings.hitRange || fighterDistance < settings.hitRange)
+                if (aiFighter.IsDodging)
                 {
-                    float damage = settings.GetDamage(punchDetector.LastPunchType);
-                    bool blocked = aiFighter.IsBlocking;
-                    aiState.TakeDamage(damage, blocked, settings.blockDamageReduction);
-                    playerState.DrainStamina(settings.punchStaminaCost);
                     playerPunchProcessed = true;
+                    Debug.Log("[Boxing] AI dodged Player's punch!");
+                }
+                else
+                {
+                    Vector3 aiTorso = aiFighter.transform.position + Vector3.up * 1.1f;
+                    Vector3 handPos = (punchDetector.LastPunchType == BoxingAction.Jab || punchDetector.LastPunchType == BoxingAction.HookLeft)
+                        ? punchDetector.LeftWristPosition
+                        : punchDetector.RightWristPosition;
 
-                    aiFighter.FlashHit();
+                    float handDist = Vector3.Distance(handPos, aiTorso);
+                    float maxHitDist = settings != null ? settings.hitRange : 1.6f;
+                    bool hitConnected = handDist < 1.25f || fighterDistance < 1.25f || (handDist < 1.5f && fighterDistance < maxHitDist);
 
-                    if (combatHUD != null)
-                        combatHUD.OnHit("PLAYER", punchDetector.LastPunchType, damage, blocked, aiTorso);
+                    if (hitConnected)
+                    {
+                        float damage = settings.GetDamage(punchDetector.LastPunchType);
+                        bool blocked = aiFighter.IsBlocking;
+                        float damageDealt = blocked ? damage * (1f - settings.blockDamageReduction) : damage;
 
-                    Debug.Log($"[Boxing] Player {punchDetector.LastPunchType} → AI! " +
-                              $"Damage: {damage:F0}{(blocked ? " (BLOCKED)" : "")} " +
-                              $"| AI Health: {aiState.health:F0}");
+                        aiState.TakeDamage(damage, blocked, settings.blockDamageReduction);
+                        playerPunchProcessed = true;
+
+                        aiFighter.FlashHit();
+
+                        if (combatHUD != null)
+                            combatHUD.OnHit("PLAYER", punchDetector.LastPunchType, damageDealt, blocked, aiTorso);
+
+                        Debug.Log($"[Boxing] Player {punchDetector.LastPunchType} → AI! " +
+                                  $"Damage: {damageDealt:F1}{(blocked ? " (BLOCKED)" : "")} " +
+                                  $"| AI Health: {aiState.health:F0}");
+                    }
                 }
             }
             if (!punchDetector.IsPunching)
@@ -326,20 +362,22 @@ namespace BoxingAI
             {
                 Vector3 playerTorso = playerState.position + Vector3.up * 1.1f;
                 float hitDist = Vector3.Distance(aiFighter.AttackHandPosition, playerTorso);
+                bool hitConnected = hitDist < 0.75f || (hitDist < 1.0f && fighterDistance < 1.35f);
 
-                if (hitDist < settings.hitRange || fighterDistance < settings.hitRange)
+                if (hitConnected)
                 {
                     float damage = settings.GetDamage(aiFighter.CurrentPunchType);
                     bool blocked = punchDetector.IsGuarding;
+                    float damageDealt = blocked ? damage * (1f - settings.blockDamageReduction) : damage;
+
                     playerState.TakeDamage(damage, blocked, settings.blockDamageReduction);
-                    aiState.DrainStamina(settings.punchStaminaCost);
                     aiPunchProcessed = true;
 
                     if (combatHUD != null)
-                        combatHUD.OnHit("AI", aiFighter.CurrentPunchType, damage, blocked, playerTorso);
+                        combatHUD.OnHit("AI", aiFighter.CurrentPunchType, damageDealt, blocked, playerTorso);
 
                     Debug.Log($"[Boxing] AI {aiFighter.CurrentPunchType} → Player! " +
-                              $"Damage: {damage:F0}{(blocked ? " (BLOCKED)" : "")} " +
+                              $"Damage: {damageDealt:F1}{(blocked ? " (BLOCKED)" : "")} " +
                               $"| Player Health: {playerState.health:F0}");
                 }
             }
@@ -352,6 +390,9 @@ namespace BoxingAI
         private void EndMatch(string result)
         {
             matchActive = false;
+
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
 
             if (matchTimer != null)
                 matchTimer.StopTimer();

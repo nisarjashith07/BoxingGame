@@ -105,12 +105,12 @@ public class SkeletonVisualizer : MonoBehaviour
             Landmark lm = pose.landmarks[i];
 
             Vector3 position = new Vector3(
-                (lm.x - 0.5f) * 8f,
-                -(lm.y - 0.5f) * 5f,
-                -lm.z * 2f
+                -lm.x * 1.5f,
+                -lm.y * 1.5f,
+                -lm.z * 1.5f
             );
 
-            points[i].transform.position = position;
+            points[i].transform.position = transform.position + position;
         }
     }
 }

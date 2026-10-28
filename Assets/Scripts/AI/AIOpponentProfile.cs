@@ -25,13 +25,11 @@ namespace BoxingAI
 
         [Header("Decision Quality")]
         [Range(0f, 1f)] public float anticipation = 0.2f;
-        [Range(0f, 1f)] public float consistency = 0.5f;
         [Range(0f, 1f)] public float randomness = 0.25f;
         [Range(0.05f, 1f)] public float decisionInterval = 0.25f;
 
         [Header("Resource Management")]
         [Range(0f, 1f)] public float staminaConservation = 0.5f;
-        [Range(0f, 1f)] public float riskTolerance = 0.5f;
 
         [Header("Preferred Range")]
         [Min(0.1f)] public float preferredDistance = 1.4f;
@@ -53,13 +51,11 @@ namespace BoxingAI
                     profile.counterSkill = 0.25f;
                     profile.adaptation = 0.10f;
                     profile.anticipation = 0.10f;
-                    profile.consistency = 0.50f;
                     profile.randomness = 0.30f;
                     profile.decisionInterval = 0.22f;
                     profile.staminaConservation = 0.35f;
-                    profile.riskTolerance = 0.50f;
                     profile.preferredDistance = 1.45f;
-                    profile.attackDistance = 1.65f;
+                    profile.attackDistance = 1.30f;
                     profile.retreatDistance = 0.70f;
                     break;
 
@@ -71,13 +67,11 @@ namespace BoxingAI
                     profile.counterSkill = 0.50f;
                     profile.adaptation = 0.40f;
                     profile.anticipation = 0.35f;
-                    profile.consistency = 0.70f;
                     profile.randomness = 0.20f;
                     profile.decisionInterval = 0.16f;
                     profile.staminaConservation = 0.55f;
-                    profile.riskTolerance = 0.60f;
                     profile.preferredDistance = 1.40f;
-                    profile.attackDistance = 1.70f;
+                    profile.attackDistance = 1.30f;
                     profile.retreatDistance = 0.70f;
                     break;
 
@@ -89,13 +83,11 @@ namespace BoxingAI
                     profile.counterSkill = 0.75f;
                     profile.adaptation = 0.75f;
                     profile.anticipation = 0.70f;
-                    profile.consistency = 0.88f;
                     profile.randomness = 0.08f;
                     profile.decisionInterval = 0.10f;
                     profile.staminaConservation = 0.70f;
-                    profile.riskTolerance = 0.65f;
                     profile.preferredDistance = 1.35f;
-                    profile.attackDistance = 1.75f;
+                    profile.attackDistance = 1.25f;
                     profile.retreatDistance = 0.70f;
                     break;
             }

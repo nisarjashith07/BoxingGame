@@ -6,6 +6,8 @@ namespace BoxingAI
     /// Controls the AI opponent's humanoid character.
     /// Translates BoxingAction commands into movement (CharacterController + Animator locomotion),
     /// attacks (IK-driven punches with torso lunges), blocking (tight guard pose), and dodging.
+    /// Enforces stamina costs and cooldowns on actual action initiation so repeated policy outputs
+    /// cannot bypass combat rules.
     /// </summary>
     [RequireComponent(typeof(Animator))]
     [RequireComponent(typeof(CharacterController))]
@@ -52,12 +54,22 @@ namespace BoxingAI
 
         // --- Public API ---
 
+        /// <summary>True during the active hit frames (Extend / Hold) of a punch.</summary>
         public bool IsAttacking => punchPhase == PunchPhase.Extend || punchPhase == PunchPhase.Hold;
+
+        /// <summary>True throughout Windup, Extend, and Hold before retraction begins.</summary>
+        public bool IsCommittedToAttack => punchPhase == PunchPhase.Windup || punchPhase == PunchPhase.Extend || punchPhase == PunchPhase.Hold;
+
         public bool IsRecovering => punchPhase == PunchPhase.Retract;
         public bool IsBlocking => isBlockingState;
+        public bool IsDodging => isDodging;
 
         public Vector3 AttackHandPosition => punchIsLeftHand ? leftHandTarget : rightHandTarget;
         public BoxingAction CurrentPunchType => currentPunchType;
+
+        // Animation Event receiver stubs for StarterAssets clips
+        private void OnFootstep(AnimationEvent animationEvent) { }
+        private void OnLand(AnimationEvent animationEvent) { }
 
         public void SetPlayerTarget(Transform target)
         {
@@ -77,6 +89,16 @@ namespace BoxingAI
         public void Initialize(CombatSettings combatSettings)
         {
             settings = combatSettings;
+        }
+
+        public void ResetFighter()
+        {
+            punchPhase = PunchPhase.None;
+            punchTimer = 0f;
+            isDodging = false;
+            dodgeTimer = 0f;
+            isBlockingState = false;
+            desiredVelocity = Vector3.zero;
         }
 
         public void FlashHit()
@@ -101,10 +123,22 @@ namespace BoxingAI
 
         public void ExecuteAction(BoxingAction action)
         {
+            ExecuteAction(action, null);
+        }
+
+        /// <summary>
+        /// Executes the chosen BoxingAction while enforcing FighterState resource/cooldown rules.
+        /// Stamina and cooldowns are applied strictly when a punch or dodge actually starts.
+        /// </summary>
+        public void ExecuteAction(BoxingAction action, FighterState state)
+        {
+            if (settings == null)
+                settings = CombatSettings.CreateDefault();
+
             isBlockingState = false;
 
-            // Don't interrupt active punch extension
-            if (punchPhase == PunchPhase.Windup || punchPhase == PunchPhase.Extend || punchPhase == PunchPhase.Hold)
+            // Don't interrupt active punch commitment
+            if (IsCommittedToAttack)
                 return;
 
             switch (action)
@@ -125,28 +159,29 @@ namespace BoxingAI
 
                 // Attacks
                 case BoxingAction.Jab:
-                    StartPunch(action, true);
+                    StartPunch(action, true, state);
                     break;
                 case BoxingAction.Cross:
-                    StartPunch(action, false);
+                    StartPunch(action, false, state);
                     break;
                 case BoxingAction.HookLeft:
-                    StartPunch(action, true);
+                    StartPunch(action, true, state);
                     break;
                 case BoxingAction.HookRight:
-                    StartPunch(action, false);
+                    StartPunch(action, false, state);
                     break;
 
                 // Defense
                 case BoxingAction.Block:
-                    isBlockingState = true;
+                    if (state == null || state.CanBlock)
+                        isBlockingState = true;
                     desiredVelocity = Vector3.zero;
                     break;
                 case BoxingAction.DodgeLeft:
-                    StartDodge(-transform.right);
+                    StartDodge(-transform.right, state);
                     break;
                 case BoxingAction.DodgeRight:
-                    StartDodge(transform.right);
+                    StartDodge(transform.right, state);
                     break;
 
                 case BoxingAction.Idle:
@@ -156,54 +191,104 @@ namespace BoxingAI
             }
         }
 
-        private void StartDodge(Vector3 direction)
+        private bool StartDodge(Vector3 direction, FighterState state)
         {
-            if (isDodging) return;
+            if (isDodging || IsCommittedToAttack)
+                return false;
+
+            if (state != null && !state.CanDodge)
+            {
+                desiredVelocity = Vector3.zero;
+                return false;
+            }
+
             isDodging = true;
             dodgeDirection = direction.normalized;
-            dodgeTimer = settings.aiDodgeDuration;
+            dodgeTimer = settings != null ? settings.aiDodgeDuration : 0.25f;
+
+            if (state != null && settings != null)
+            {
+                state.DrainStamina(settings.dodgeStaminaCost);
+                state.dodgeCooldown = settings.dodgeCooldown;
+            }
+
+            return true;
         }
 
         // --- Punch State Machine ---
 
-        private void StartPunch(BoxingAction type, bool leftHand)
+        private bool StartPunch(BoxingAction type, bool leftHand, FighterState state)
         {
-            if (punchPhase != PunchPhase.None) return;
+            if (punchPhase != PunchPhase.None || isDodging)
+                return false;
+
+            if (state != null && !state.CanAttack)
+            {
+                desiredVelocity = Vector3.zero;
+                return false;
+            }
+
             punchPhase = PunchPhase.Windup;
-            punchTimer = 0.08f;
+            punchTimer = settings != null ? settings.aiPunchWindup : 0.08f;
             punchIsLeftHand = leftHand;
             currentPunchType = type;
+
+            if (state != null && settings != null)
+            {
+                state.DrainStamina(settings.punchStaminaCost);
+                state.attackCooldown = settings.attackCooldown;
+                state.isAttacking = true;
+            }
 
             // Step slightly forward during punch to ensure reach
             if (playerTarget != null && Vector3.Distance(transform.position, playerTarget.position) > 1.25f)
             {
                 desiredVelocity = transform.forward * 1.2f;
             }
+
+            return true;
         }
 
-        private void UpdatePunchPhase()
+        /// <summary>
+        /// Advances punch phase and dodge timers by deltaTime.
+        /// </summary>
+        public void TickActionTimers(float deltaTime)
+        {
+            if (isDodging)
+            {
+                dodgeTimer -= deltaTime;
+                if (dodgeTimer <= 0f)
+                    isDodging = false;
+            }
+
+            UpdatePunchPhase(deltaTime);
+        }
+
+        private void UpdatePunchPhase(float deltaTime)
         {
             if (punchPhase == PunchPhase.None) return;
 
-            punchTimer -= Time.deltaTime;
-            if (punchTimer <= 0f)
+            punchTimer -= deltaTime;
+            while (punchTimer <= 0f && punchPhase != PunchPhase.None)
             {
+                float overflow = -punchTimer;
                 switch (punchPhase)
                 {
                     case PunchPhase.Windup:
                         punchPhase = PunchPhase.Extend;
-                        punchTimer = 0.12f;
+                        punchTimer = (settings != null ? settings.aiPunchExtend : 0.12f) - overflow;
                         break;
                     case PunchPhase.Extend:
                         punchPhase = PunchPhase.Hold;
-                        punchTimer = 0.06f;
+                        punchTimer = (settings != null ? settings.aiPunchHold : 0.06f) - overflow;
                         break;
                     case PunchPhase.Hold:
                         punchPhase = PunchPhase.Retract;
-                        punchTimer = 0.12f;
+                        punchTimer = (settings != null ? settings.aiPunchRetract : 0.12f) - overflow;
                         break;
                     case PunchPhase.Retract:
                         punchPhase = PunchPhase.None;
+                        punchTimer = 0f;
                         break;
                 }
             }
@@ -213,6 +298,9 @@ namespace BoxingAI
 
         private void Update()
         {
+            if (settings == null)
+                settings = CombatSettings.CreateDefault();
+
             // Reset flash color after hit impact
             if (flashTimer > 0f)
             {
@@ -245,23 +333,32 @@ namespace BoxingAI
                 }
             }
 
-            // Prevent pushing forward when already in punching pocket range
-            if (playerTarget != null && Vector3.Distance(transform.position, playerTarget.position) < 1.35f)
+            // Maintain pocket range: close gap if player is too far, stop if in close pocket (0.80m)
+            if (playerTarget != null)
             {
-                if (Vector3.Dot(desiredVelocity, transform.forward) > 0f)
-                    desiredVelocity = Vector3.zero;
+                float fighterDist = Vector3.Distance(transform.position, playerTarget.position);
+                if (fighterDist < 0.80f)
+                {
+                    if (Vector3.Dot(desiredVelocity, transform.forward) > 0f)
+                        desiredVelocity = Vector3.zero;
+                }
+                else if (fighterDist > 1.25f && !isDodging && punchPhase == PunchPhase.None)
+                {
+                    // Step forward to close distance into punch pocket
+                    desiredVelocity = transform.forward * settings.aiMoveSpeed;
+                }
             }
 
             // Movement handling (slow controlled boxing shuffle, no running)
             Vector3 moveVec = desiredVelocity;
             if (isDodging)
             {
-                dodgeTimer -= Time.deltaTime;
                 float dodgeSpeed = settings.aiDodgeDistance / Mathf.Max(settings.aiDodgeDuration, 0.01f);
                 moveVec = dodgeDirection * dodgeSpeed;
-                if (dodgeTimer <= 0f)
-                    isDodging = false;
             }
+
+            // Advance dodge & punch phase state machines
+            TickActionTimers(Time.deltaTime);
 
             // Move character controller
             if (characterController != null && characterController.enabled)
@@ -280,9 +377,6 @@ namespace BoxingAI
                 animator.SetFloat("Speed", currentMoveSpeed);
                 animator.SetFloat("MotionSpeed", 1f);
             }
-
-            // Progress punch phases
-            UpdatePunchPhase();
 
             // Calculate IK arm targets
             UpdateIKTargets();
@@ -331,13 +425,15 @@ namespace BoxingAI
                         t = 0f;
                         break;
                     case PunchPhase.Extend:
-                        t = 1f - (punchTimer / 0.12f);
+                        float extDur = settings != null ? settings.aiPunchExtend : 0.12f;
+                        t = 1f - (punchTimer / Mathf.Max(extDur, 0.01f));
                         break;
                     case PunchPhase.Hold:
                         t = 1f;
                         break;
                     case PunchPhase.Retract:
-                        t = punchTimer / 0.12f;
+                        float retDur = settings != null ? settings.aiPunchRetract : 0.12f;
+                        t = punchTimer / Mathf.Max(retDur, 0.01f);
                         break;
                 }
 
@@ -351,6 +447,12 @@ namespace BoxingAI
 
                 float reach = 1.05f;
                 Vector3 punchTarget = shoulderOrigin + punchDir * reach;
+                if (currentPunchType == BoxingAction.HookLeft || currentPunchType == BoxingAction.HookRight)
+                {
+                    float hookArc = Mathf.Sin(Mathf.Clamp01(t) * Mathf.PI);
+                    Vector3 lateralDir = punchIsLeftHand ? -transform.right : transform.right;
+                    punchTarget += lateralDir * (0.35f * hookArc);
+                }
                 Quaternion punchRot = Quaternion.LookRotation(punchDir, Vector3.up);
 
                 if (punchIsLeftHand)

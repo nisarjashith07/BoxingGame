@@ -9,7 +9,6 @@ namespace BoxingAI
         private readonly OpponentPatternMemory memory = new OpponentPatternMemory();
 
         private BoxingAction lastAction = BoxingAction.Idle;
-        private BoxingAction previousAction = BoxingAction.Idle;
         private float decisionTimer;
         private int comboStep;
         private float comboTimer;
@@ -24,12 +23,13 @@ namespace BoxingAI
 
         public BoxingAction Decide(BoxingObservation observation, float deltaTime)
         {
-            memory.Observe(observation);
             decisionTimer -= deltaTime;
             comboTimer -= deltaTime;
 
             if (decisionTimer > 0f)
                 return lastAction;
+
+            memory.Observe(observation);
 
             decisionTimer = Mathf.Max(0.05f,
                 profile.decisionInterval * UnityEngine.Random.Range(1f - profile.randomness, 1f + profile.randomness));
@@ -38,7 +38,6 @@ namespace BoxingAI
                 comboStep = 0;
 
             BoxingAction chosen = ChooseAction(observation);
-            previousAction = lastAction;
             lastAction = chosen;
             return chosen;
         }

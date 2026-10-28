@@ -68,11 +68,11 @@ class SkeletonOneEuroFilter:
         self.filters = []
         for i in range(landmark_count):
             if i in (15, 16, 17, 18, 19, 20, 21, 22):  # Hands / Wrists: high beta for zero punch lag
-                self.filters.append(OneEuroFilter(min_cutoff=1.6, beta=0.45, d_cutoff=1.0))
+                self.filters.append(OneEuroFilter(min_cutoff=min_cutoff * 1.1, beta=beta * 1.3, d_cutoff=d_cutoff))
             elif i in (13, 14):  # Elbows
-                self.filters.append(OneEuroFilter(min_cutoff=1.8, beta=0.25, d_cutoff=1.0))
+                self.filters.append(OneEuroFilter(min_cutoff=min_cutoff * 1.2, beta=beta * 0.7, d_cutoff=d_cutoff))
             else:  # Head, Shoulders, Torso: smooth stability
-                self.filters.append(OneEuroFilter(min_cutoff=1.2, beta=0.08, d_cutoff=1.0))
+                self.filters.append(OneEuroFilter(min_cutoff=min_cutoff * 0.8, beta=beta * 0.25, d_cutoff=d_cutoff))
 
     def filter_skeleton(self, landmarks, t):
         result = []

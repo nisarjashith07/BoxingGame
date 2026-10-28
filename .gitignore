@@ -55,5 +55,12 @@ ENV/
 env.bak/
 venv.bak/
 
-# VS Code
+# VS Code & IDEs
 .vscode/
+.vs/
+UpgradeLog*.htm
+UpgradeLog*.XML
+
+# Unity crash recovery files
+Assets/[_Rr]ecovery/
+Assets/[_Rr]ecovery.meta

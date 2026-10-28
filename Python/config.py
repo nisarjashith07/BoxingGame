@@ -7,6 +7,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "pose_landmarker_full.task"
+LITE_MODEL_PATH = BASE_DIR / "models" / "pose_landmarker_lite.task"
+USE_LITE_MODEL = False
 
 # ==========================================
 # DUAL CAMERA CONFIGURATION
@@ -17,9 +19,16 @@ FRONT_CAMERA_INDEX = 0
 # Side Camera (Phone camera positioned on the RIGHT side of player)
 SIDE_CAMERA_INDEX = 1
 
-# Capture resolution (640x480 provides fast 50-60 FPS capture with zero USB bus latency)
+# Capture resolution (640x480 provides fast 50-60 FPS capture with minimal USB bus overhead)
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
+
+# Inter-camera synchronization and frame freshness thresholds
+MAX_CAMERA_SYNC_SKEW_SEC = 0.10  # Max allowable capture time difference (100ms) between front & side
+MAX_FRAME_AGE_SEC = 0.15         # Stale frame threshold (150ms)
+
+# Front camera horizontal mirroring (mirror view like a looking glass / selfie preview)
+FRONT_CAMERA_FLIP_HORIZONTAL = True
 
 # Side camera placement: True if on player's right, False if on player's left
 SIDE_CAMERA_ON_RIGHT = True
@@ -33,9 +42,10 @@ SIDE_CAMERA_ROTATION = 0
 # ==========================================
 # 3D FUSION & ACCURACY ENGINE
 # ==========================================
-# MediaPipe detection and tracking confidence thresholds
+# MediaPipe detection, tracking, and landmark visibility confidence thresholds
 MIN_DETECTION_CONFIDENCE = 0.55
 MIN_TRACKING_CONFIDENCE = 0.60
+MIN_LANDMARK_VISIBILITY = 0.35
 
 # Weight of side camera for forward punch depth (0.0 to 1.0)
 FUSION_DEPTH_WEIGHT = 0.92

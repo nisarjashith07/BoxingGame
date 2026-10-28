@@ -1,3 +1,13 @@
+# ==============================================================================
+# Path A: Real-Time Dual-Camera Motion Tracking (No PyTorch/GPU required)
+# Install: pip install -r Python/requirements.txt
+# ==============================================================================
 mediapipe==0.10.35
-opencv-python
-numpy
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# ==============================================================================
+# Path B: Offline Deep RL Policy Training & Weight Export
+# Install: pip install -r Python/rl/requirements.txt
+# (Includes PyTorch, Gymnasium, and ONNX Runtime)
+# ==============================================================================

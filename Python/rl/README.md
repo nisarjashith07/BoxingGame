@@ -1,7 +1,7 @@
-# BoxingGame RL Training Pipeline
+# BoxingGame RL Training & Policy Export Pipeline
 
-Python-native Proximal Policy Optimization (PPO) pipeline that trains a boxing AI brain without Unity.  
-After training, export the policy to ONNX and load it in Unity via Barracuda.
+Python-native Proximal Policy Optimization (PPO) pipeline that trains a boxing AI opponent without Unity.  
+Trained policies export directly to a compact binary format (`boxing_ai_policy.bytes`) executed by Unity via a pure C# zero-allocation neural network (`RLPolicyNetwork.cs`), or to ONNX for offline validation.
 
 ---
 
@@ -11,36 +11,27 @@ After training, export the policy to ONNX and load it in Unity via Barracuda.
 BoxingGame/
 └── Python/
     └── rl/
-        ├── boxing_env.py       # Gymnasium environment
-        ├── policy.py           # Actor-Critic neural network
-        ├── train.py            # PPO training loop
-        ├── export_onnx.py      # Export to ONNX
-        ├── inference_test.py   # Test ONNX inference
-        ├── boxing_ai_policy.onnx  (generated after export)
+        ├── boxing_env.py            # Gymnasium combat simulator aligned with CombatSettings.cs
+        ├── policy.py                # Actor-Critic PyTorch network (18 obs -> 12 actions)
+        ├── train.py                 # PPO training loop with curriculum learning
+        ├── export_weights_binary.py # Exports binary weights for Unity (boxing_ai_policy.bytes)
+        ├── export_onnx.py           # Exports to ONNX for offline inspection
+        ├── inference_test.py        # Validates inference against scripted bots
+        ├── requirements.txt         # RL dependencies (PyTorch, Gymnasium, ONNX)
         └── checkpoints/
-            ├── boxing_ai_100000.pt
-            ├── boxing_ai_200000.pt
-            ├── ...
-            └── boxing_ai_final.pt
+            └── boxing_ai_final.pt   # PyTorch final checkpoint
 ```
 
 ---
 
-## Requirements
+## Requirements & Setup
 
-```
-Python >= 3.10
-torch >= 2.0
-numpy
-gymnasium >= 0.26
-onnx              # for export verification
-onnxruntime       # for inference_test.py
-```
-
-Install:
+Install RL dependencies:
 ```bash
-pip install torch numpy gymnasium onnx onnxruntime
+pip install -r Python/rl/requirements.txt
 ```
+
+*(Note: the main real-time motion tracking app uses `Python/requirements.txt` which does not require PyTorch or GPU).*
 
 ---
 
@@ -87,11 +78,18 @@ Final model: `Python/rl/checkpoints/boxing_ai_final.pt`
 
 ## How to Export
 
+### Export for Unity (Recommended)
+Export binary policy weights directly into Unity's Resources:
+```bash
+python Python/rl/export_weights_binary.py
+```
+This produces `Assets/Resources/boxing_ai_policy.bytes` with self-describing v2 contract metadata (schema hash, normalization scales, rules version).
+
+### Export to ONNX (Offline Inspection)
 ```bash
 python -m Python.rl.export_onnx
 ```
-
-Exports `boxing_ai_policy.onnx` to `Python/rl/`.
+Exports `Python/rl/boxing_ai_policy.onnx` for inspection with [Netron](https://netron.app) or Python inference testing.
 
 ---
 
@@ -108,45 +106,68 @@ Runs 20 episodes vs each difficulty level (Easy / Medium / Hard) using the ONNX 
 
 ---
 
-## ONNX Model Specification
+## Model Specification
 
-### Input
+### Input Observation Vector
 
 | Name | Shape | dtype | Description |
 |------|-------|-------|-------------|
-| `observation` | `[1, 18]` | float32 | 18-element observation vector |
+| `observation` | `[1, 18]` | float32 | 18-element normalized observation vector |
 
 #### Observation fields (index order)
 
-| Index | Field | Range |
-|-------|-------|-------|
-| 0 | `distance` (normalised) | [0, 1] |
-| 1 | `selfHealth01` | [0, 1] |
-| 2 | `selfStamina01` | [0, 1] |
-| 3 | `opponentHealth01` | [0, 1] |
-| 4 | `opponentStamina01` | [0, 1] |
-| 5 | `selfGuard01` | [0, 1] |
-| 6 | `opponentGuard01` | [0, 1] |
-| 7 | `relativeX` | [−1, 1] |
-| 8 | `relativeZ` | [−1, 1] |
-| 9 | `relativeVelocityX` | [−1, 1] |
-| 10 | `relativeVelocityZ` | [−1, 1] |
-| 11 | `opponentAttackIntent01` | [0, 1] |
-| 12 | `incomingAttack` | {0, 1} |
-| 13 | `opponentRecovering` | {0, 1} |
-| 14 | `selfCanAttack` | {0, 1} |
-| 15 | `selfCanDodge` | {0, 1} |
-| 16 | `selfCanBlock` | {0, 1} |
-| 17 | `healthAdvantage` | [−1, 1] |
-
-### Outputs
-
-| Name | Shape | dtype | Description |
-|------|-------|-------|-------------|
-| `action` | `[1]` | int64 | Chosen action (argmax of logits) |
-| `logits` | `[1, 12]` | float32 | Raw policy logits for all 12 actions |
+| Index | Field | Range | Description |
+|-------|-------|-------|-------------|
+| 0 | `distance` | [0, 1] | Distance divided by 10.0m |
+| 1 | `selfHealth01` | [0, 1] | AI HP / 100.0 |
+| 2 | `selfStamina01` | [0, 1] | AI stamina / 100.0 |
+| 3 | `opponentHealth01` | [0, 1] | Opponent HP / 100.0 |
+| 4 | `opponentStamina01` | [0, 1] | Opponent stamina / 100.0 |
+| 5 | `selfGuard01` | [0, 1] | AI guard meter |
+| 6 | `opponentGuard01` | [0, 1] | Opponent guard meter |
+| 7 | `relativeX` | [−1, 1] | Relative lateral displacement / 5.0m |
+| 8 | `relativeZ` | [−1, 1] | Relative forward displacement / 5.0m |
+| 9 | `relativeVelocityX` | [−1, 1] | Local relative lateral velocity (m/s) |
+| 10 | `relativeVelocityZ` | [−1, 1] | Local relative forward velocity (m/s) |
+| 11 | `opponentAttackIntent01` | [0, 1] | Opponent attack intent |
+| 12 | `incomingAttack` | {0, 1} | Active punch incoming |
+| 13 | `opponentRecovering` | {0, 1} | Opponent in whiff/hit recovery |
+| 14 | `selfCanAttack` | {0, 1} | AI has stamina and cooldown ready |
+| 15 | `selfCanDodge` | {0, 1} | AI has stamina and cooldown ready |
+| 16 | `selfCanBlock` | {0, 1} | AI has stamina ready |
+| 17 | `healthAdvantage` | [−1, 1] | (selfHealth01 - oppHealth01) |
 
 ### Action mapping
+
+| Index | Action | Cost | Base Damage | Startup / Description |
+|---|---|---|---|---|
+| 0 | `Idle` | 0 | 0 | Resting stance, regenerates stamina |
+| 1 | `MoveForward` | 0 | 0 | Steps into punching pocket |
+| 2 | `MoveBackward` | 0 | 0 | Steps back out of range |
+| 3 | `StrafeLeft` | 0 | 0 | Circles counter-clockwise |
+| 4 | `StrafeRight` | 0 | 0 | Circles clockwise |
+| 5 | `Jab` | 12 | 8 | Fast straight lead punch |
+| 6 | `Cross` | 12 | 14 | Power straight punch |
+| 7 | `HookLeft` | 12 | 18 | Lateral hook punch |
+| 8 | `HookRight` | 12 | 18 | Lateral hook punch |
+| 9 | `Block` | 5/s | 0 | Reduces incoming damage by 75% |
+| 10 | `DodgeLeft` | 20 | 0 | Active invulnerability slip |
+| 11 | `DodgeRight` | 20 | 0 | Active invulnerability slip |
+
+---
+
+## Integration in Unity (Zero-Package Runtime)
+
+No Barracuda or external neural network packages are needed. The Unity project includes a native, high-performance C# inference engine (`RLPolicyNetwork.cs`):
+
+1. **Automatic Loading:**
+   The AI opponent controller (`RLOpponentController.cs`) automatically loads `Assets/Resources/boxing_ai_policy.bytes` on startup via `Resources.Load<TextAsset>()`.
+2. **Contract Hash Verification:**
+   The network validates the magic header (`0x424F5849`) and checks the FNV-1a schema hash (`0xD6A3BCD8`) to ensure the observation layout and combat rules match the trained model.
+3. **Zero Allocation:**
+   All inference buffers are pre-allocated at startup. Running forward inference takes less than `0.02ms` on modern CPUs with 0 B/frame GC allocation.
+4. **Resilient Fallback:**
+   If no policy asset is provided or the file is corrupted, the controller smoothly falls back to the heuristic `AIOpponentBrain`.
 
 | Value | Action |
 |-------|--------|
@@ -167,98 +188,27 @@ Runs 20 episodes vs each difficulty level (Easy / Medium / Hard) using the ONNX 
 
 ## Unity Integration (Barracuda)
 
-### 1. Install Barracuda
-
-In **Package Manager** → *Add package by name*:
-```
-com.unity.barracuda
-```
-Version `3.0.0` or later.
-
-### 2. Import the ONNX model
-
-Copy `boxing_ai_policy.onnx` into your Unity project's `Assets/` folder.  
-Unity will import it automatically as a `NNModel` asset.
-
-### 3. Create `RLOpponentController.cs`
+### C# Execution Example (`RLOpponentController.cs`)
 
 ```csharp
-using Unity.Barracuda;
-using UnityEngine;
+// Loads boxing_ai_policy.bytes from Assets/Resources/
+var textAsset = Resources.Load<TextAsset>("boxing_ai_policy");
+var policy = RLPolicyNetwork.LoadFromBytes(textAsset.bytes);
 
-public class RLOpponentController : MonoBehaviour
-{
-    [Header("Model")]
-    public NNModel modelAsset;          // drag the .onnx asset here
+// 18-element buffer (zero GC allocations)
+float[] buffer = new float[18];
+RLOpponentController.BuildInputBuffer(currentObservation, buffer, policy);
 
-    private IWorker _worker;
-    private const int OBS_DIM = 18;
-
-    void Start()
-    {
-        var model = ModelLoader.Load(modelAsset);
-        _worker   = WorkerFactory.CreateWorker(WorkerFactory.Type.CSharpBurst, model);
-    }
-
-    /// <summary>
-    /// Call each AI decision tick. Returns BoxingAction integer.
-    /// </summary>
-    public int Decide(BoxingObservation obs)
-    {
-        float[] raw = BuildObservationArray(obs);
-
-        using var tensor = new Tensor(1, OBS_DIM, raw);
-        _worker.Execute(tensor);
-
-        // "action" output is the argmax (int64 stored as float in Barracuda)
-        using var actionOut = _worker.PeekOutput("action");
-        return Mathf.RoundToInt(actionOut[0]);
-    }
-
-    private float[] BuildObservationArray(BoxingObservation o)
-    {
-        float healthAdv = (o.selfHealth01 - o.opponentHealth01);
-        return new float[]
-        {
-            o.distance / 10f,          // normalise distance
-            o.selfHealth01,
-            o.selfStamina01,
-            o.opponentHealth01,
-            o.opponentStamina01,
-            o.selfGuard01,
-            o.opponentGuard01,
-            Mathf.Clamp(o.relativeX / 5f, -1f, 1f),
-            Mathf.Clamp(o.relativeZ / 5f, -1f, 1f),
-            Mathf.Clamp(o.relativeVelocityX, -1f, 1f),
-            Mathf.Clamp(o.relativeVelocityZ, -1f, 1f),
-            o.opponentAttackIntent01,
-            o.incomingAttack ? 1f : 0f,
-            o.opponentRecovering ? 1f : 0f,
-            o.selfCanAttack ? 1f : 0f,
-            o.selfCanDodge ? 1f : 0f,
-            o.selfCanBlock ? 1f : 0f,
-            healthAdv,
-        };
-    }
-
-    void OnDestroy()
-    {
-        _worker?.Dispose();
-    }
-}
+// Predict next boxing action in < 0.02ms
+BoxingAction action = policy.Predict(buffer, out float[] logits);
 ```
 
-### 4. Normalisation contract
-
-The Python environment normalises `distance` by dividing by `ARENA_HALF * 2 = 10.0`.  
-Match this in `BuildObservationArray`: `o.distance / 10f`.  
-All other fields are already in `[0,1]` or `[-1,1]`.
-
-### 5. Performance tips
-
-- Call `Decide()` every **3–5 fixed-update frames** (≈ 10–17 Hz) rather than every frame.
-- Prefer `WorkerFactory.Type.CSharpBurst` on standalone builds.
-- Pre-allocate the `float[]` array and reuse it to avoid GC pressure.
+### Observation Normalization Rules
+The network expects inputs normalized identically to training:
+- Distance: `distance / 10.0f`
+- Health / Stamina: `[0.0, 1.0]`
+- Relative Displacements: `relativeX / 5.0f`, `relativeZ / 5.0f`
+- Relative Velocities: `localRelVel.x`, `localRelVel.z` clamped to `[-1.0, 1.0]` m/s
 
 ---
 

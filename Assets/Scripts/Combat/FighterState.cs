@@ -29,7 +29,7 @@ namespace BoxingAI
 
         // --- Derived Properties ---
 
-        public bool CanAttack => attackCooldown <= 0f && stamina > 10f && !isRecovering;
+        public bool CanAttack => attackCooldown <= 0f && stamina > 10f && !isRecovering && !isAttacking;
         public bool CanDodge => dodgeCooldown <= 0f && stamina > 15f && !isAttacking;
         public bool CanBlock => stamina > 5f && !isAttacking;
         public bool IsAlive => health > 0f;
@@ -81,6 +81,7 @@ namespace BoxingAI
             isRecovering = false;
             attackCooldown = 0f;
             dodgeCooldown = 0f;
+            previousPosition = position;
             velocity = Vector3.zero;
         }
     }

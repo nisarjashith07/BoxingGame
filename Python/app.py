@@ -1,6 +1,7 @@
 import cv2
 import sys
 import ctypes
+import argparse
 from pathlib import Path
 
 # Ensure Python directory is in sys.path
@@ -12,13 +13,22 @@ from networking.udp_sender import UDPSender
 
 
 def main():
+    parser = argparse.ArgumentParser(description="VR Boxing Dual-Camera 3D Pose Tracking Pipeline")
+    parser.add_argument("--lite", action="store_true", help="Use lightweight MediaPipe Pose model for lower CPU / laptop battery optimization")
+    parser.add_argument("--front", type=int, default=None, help="Front camera index (overrides config)")
+    parser.add_argument("--side", type=int, default=None, help="Side camera index (overrides config)")
+    args = parser.parse_args()
+
     print("=" * 60)
     print("  HIGH-SPEED VR BOXING DUAL-CAMERA TRACKING PIPELINE")
     print("  Front Camera: PC Webcam (Lateral + Height)")
     print("  Side Camera:  Phone Cam on Right (Optical Punch Depth)")
+    if args.lite:
+        print("  Mode:         LITE MODEL (Event Fallback / Fast Inference)")
     print("  Hotkeys:")
     print("    [Q] / [ESC] - Quit")
     print("    [C]         - Calibrate Neutral Guard Stance (2.5s)")
+    print("    [F]         - Toggle Front Camera Mirror (Left/Right)")
     print("    [M]         - Toggle Side Camera Horizontal Mirror")
     print("    [R]         - Rotate Side Camera 90 degrees")
     print("=" * 60)
@@ -31,7 +41,7 @@ def main():
         except Exception:
             pass
 
-    tracker = DualPoseTracker()
+    tracker = DualPoseTracker(use_lite_model=args.lite, front_index=args.front, side_index=args.side)
     sender = UDPSender()
     visualizer = DualPoseVisualizer()
 
@@ -60,6 +70,8 @@ def main():
             if key == 27 or key == ord('q') or key == ord('Q'):
                 print("Exit requested by user.")
                 break
+            elif key == ord('f') or key == ord('F'):
+                tracker.toggle_front_flip()
             elif key == ord('m') or key == ord('M'):
                 tracker.toggle_side_flip()
             elif key == ord('r') or key == ord('R'):

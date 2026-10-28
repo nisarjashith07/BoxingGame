@@ -25,7 +25,7 @@ namespace BoxingAI
             float attack = observation.opponentAttackIntent01;
             float close = observation.distance < 1.35f ? 1f : 0f;
             float block = observation.opponentGuard01;
-            float dodge = observation.incomingAttack && observation.selfCanDodge ? 1f : 0f;
+            float dodge = Mathf.Abs(observation.relativeVelocityX) > 0.6f ? 1f : 0f;
 
             float alpha = observations < 20 ? 0.10f : 0.05f;
             attackRate = Mathf.Lerp(attackRate, attack, alpha);

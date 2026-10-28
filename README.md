@@ -44,7 +44,7 @@ Play by throwing real punches and slipping in front of your dual-camera setup (P
 
 ### Why Dual Camera?
 - **Single Camera Limitation:** When punching directly towards a front webcam, the fist foreshortens. MediaPipe's monocular depth heuristic compresses or jitters, causing punches to under-extend or snap back.
-- **Dual Camera Advantage:** From the side camera (positioned on the player's right), a forward punch moves horizontally across the camera's sensor. This transforms depth estimation into a direct 2D optical measurement, providing millimeter-accurate punch extension and full arm lockout!
+- **Dual Camera Advantage:** From the side camera (positioned on the player's right), a forward punch moves horizontally across the camera's sensor. This transforms depth estimation into a direct 2D optical measurement, providing high-accuracy punch extension and full arm lockout!
 
 ---
 
@@ -52,9 +52,11 @@ Play by throwing real punches and slipping in front of your dual-camera setup (P
 
 - **Dual-Camera 3D Motion Tracking (No VR Required)**:
   - Fuses PC front webcam (lateral/vertical) and phone side camera (punch reach/depth).
-  - 1€ Filter (One Euro Filter) eliminates micro-jitter in guard stance while providing zero-latency punches.
+  - 1€ Filter (One Euro Filter) eliminates micro-jitter in guard stance while providing fast, responsive punch dynamics.
+  - Inter-camera capture timestamping with automatic synchronization skew detection and graceful single-camera fallback.
   - Rigid anatomical bone constraints prevent rubber-arm distortion.
   - Interactive 1-click calibration (`Press [C]`) to match your exact arm reach.
+  - Event booth optimization: `--lite` flag for lower-spec fallback laptops.
 - **Dedicated Boxing Footwork**: Lock-on boxer movement system. Move forward to step into the pocket, retreat to slip back, and circle/strafe around the opponent while maintaining stance.
 - **Adaptive AI Boxer**: Multi-tier AI opponent (Easy, Medium, Hard) driven by a Utility/FSM decision engine that reads player distance, attack intent, and stamina to trade punches, slip, and counter.
 - **Full Punch Arsenal**: Left Jabs, Right Crosses, Left Hooks, Right Hooks, and High Guard Defense with procedural inverse kinematics (IK) bone animation.

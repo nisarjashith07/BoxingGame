@@ -7,6 +7,7 @@ using System.Threading;
 public class UDPReceiver : MonoBehaviour
 {
     public static string LatestJson = "";
+    public static volatile bool HasNewJson = false;
 
     private UdpClient client;
     private Thread receiveThread;
@@ -34,6 +35,7 @@ public class UDPReceiver : MonoBehaviour
             {
                 byte[] data = client.Receive(ref endPoint);
                 LatestJson = Encoding.UTF8.GetString(data);
+                HasNewJson = true;
             }
         }
         catch (SocketException)
@@ -46,13 +48,38 @@ public class UDPReceiver : MonoBehaviour
         }
     }
 
+    void OnDisable()
+    {
+        CloseSocket();
+    }
+
+    void OnDestroy()
+    {
+        CloseSocket();
+    }
+
     void OnApplicationQuit()
     {
-        client?.Close();
+        CloseSocket();
+    }
 
-        if (receiveThread != null)
+    private void CloseSocket()
+    {
+        try
         {
-            receiveThread.Join(100);
+            client?.Close();
+            client = null;
+        }
+        catch { }
+
+        if (receiveThread != null && receiveThread.IsAlive)
+        {
+            try
+            {
+                receiveThread.Join(100);
+            }
+            catch { }
+            receiveThread = null;
         }
     }
 }

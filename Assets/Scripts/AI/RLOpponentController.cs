@@ -13,13 +13,17 @@ namespace BoxingAI
     public class RLOpponentController : MonoBehaviour
     {
         [Header("Model Configuration")]
-        [Tooltip("The binary policy weights asset (boxing_ai_policy.bytes). If unassigned, automatically loaded from Resources or Assets/Models.")]
+        [Tooltip("The binary policy weights asset (boxing_ai_policy.bytes). If unassigned, automatically loaded from Resources.")]
         [SerializeField] private TextAsset policyModelAsset;
 
         [Header("Fallback")]
         [Tooltip("If the RL model cannot be loaded, fall back to the scripted AI brain.")]
         [SerializeField] private bool fallbackToScripted = true;
         [SerializeField] private AIDifficulty fallbackDifficulty = AIDifficulty.Hard;
+
+        [Header("Decision Frequency")]
+        [Tooltip("Seconds between RL policy evaluations (~6-7 Hz prevents action flapping and stamina spam).")]
+        [SerializeField] private float decisionInterval = 0.15f;
 
         [Header("Debug")]
         [SerializeField] private bool logActions = false;
@@ -28,10 +32,12 @@ namespace BoxingAI
         private RLPolicyNetwork policyNetwork;
         private AIOpponentBrain fallbackBrain;
         private readonly float[] inputBuffer = new float[18];
+        private float decisionTimer;
 
         public bool IsUsingRL => policyNetwork != null && policyNetwork.IsLoaded;
         public BoxingAction CurrentAction { get; private set; } = BoxingAction.Idle;
         public BoxingObservation LatestObservation { get; private set; }
+        public RLPolicyNetwork PolicyNetwork => policyNetwork;
 
         private void Awake()
         {
@@ -46,7 +52,7 @@ namespace BoxingAI
                 try
                 {
                     policyNetwork = RLPolicyNetwork.LoadFromBytes(policyModelAsset.bytes);
-                    Debug.Log("<color=green>[RLOpponent] Trained RL policy loaded successfully from assigned asset.</color>");
+                    Debug.Log($"<color=green>[RLOpponent] Trained RL policy (v{policyNetwork.PolicyVersion}) loaded from assigned asset.</color>");
                     return;
                 }
                 catch (Exception ex)
@@ -55,14 +61,14 @@ namespace BoxingAI
                 }
             }
 
-            // 2. Try loading from Resources
+            // 2. Try loading from Resources (single canonical path: Assets/Resources/boxing_ai_policy.bytes)
             var resAsset = Resources.Load<TextAsset>("boxing_ai_policy");
             if (resAsset != null && resAsset.bytes != null && resAsset.bytes.Length > 0)
             {
                 try
                 {
                     policyNetwork = RLPolicyNetwork.LoadFromBytes(resAsset.bytes);
-                    Debug.Log("<color=green>[RLOpponent] Trained RL policy loaded automatically from Resources.</color>");
+                    Debug.Log($"<color=green>[RLOpponent] Trained RL policy (v{policyNetwork.PolicyVersion}) loaded automatically from Resources.</color>");
                     return;
                 }
                 catch (Exception ex)
@@ -84,10 +90,24 @@ namespace BoxingAI
         {
             LatestObservation = obs;
 
+            decisionTimer -= Time.deltaTime;
+            if (decisionTimer > 0f && CurrentAction != BoxingAction.Idle)
+            {
+                return CurrentAction;
+            }
+            decisionTimer = decisionInterval;
+
             if (IsUsingRL)
             {
-                BuildInputBuffer(obs, inputBuffer);
+                BuildInputBuffer(obs, inputBuffer, policyNetwork);
                 BoxingAction action = policyNetwork.Predict(inputBuffer, out float[] logits);
+
+                // Gap closing: if outside punching pocket, advance into the pocket instead of spamming side dodges
+                if (obs.distance > 1.15f && (action == BoxingAction.DodgeLeft || action == BoxingAction.DodgeRight || action == BoxingAction.MoveBackward))
+                {
+                    action = BoxingAction.MoveForward;
+                }
+
                 CurrentAction = action;
 
                 if (logLogits)
@@ -120,6 +140,7 @@ namespace BoxingAI
         {
             CurrentAction = BoxingAction.Idle;
             LatestObservation = default;
+            decisionTimer = 0f;
             if (fallbackBrain != null)
             {
                 var profile = AIOpponentProfile.CreateRuntime(fallbackDifficulty);
@@ -133,27 +154,47 @@ namespace BoxingAI
             InitializeModel();
         }
 
-        private static void BuildInputBuffer(BoxingObservation o, float[] buffer)
+        /// <summary>
+        /// Normalizes observation into the 18-element network input buffer.
+        /// Version-aware: honors the exact observation distribution the model was trained on.
+        /// </summary>
+        public static void BuildInputBuffer(BoxingObservation o, float[] buffer, RLPolicyNetwork net = null)
         {
-            // ARENA_HALF = 5.0f, MAX_HP = 100.0f (exact match with boxing_env.py)
-            buffer[0]  = Mathf.Clamp01(o.distance / 10.0f);                      // distance normalised
-            buffer[1]  = Mathf.Clamp01(o.selfHealth01);                          // selfHealth01
-            buffer[2]  = Mathf.Clamp01(o.selfStamina01);                         // selfStamina01
-            buffer[3]  = Mathf.Clamp01(o.opponentHealth01);                      // opponentHealth01
-            buffer[4]  = Mathf.Clamp01(o.opponentStamina01);                     // opponentStamina01
-            buffer[5]  = Mathf.Clamp01(o.selfGuard01);                           // selfGuard01
-            buffer[6]  = Mathf.Clamp01(o.opponentGuard01);                       // opponentGuard01
-            buffer[7]  = Mathf.Clamp(o.relativeX / 5.0f, -1.0f, 1.0f);            // relativeX
-            buffer[8]  = Mathf.Clamp(o.relativeZ / 5.0f, -1.0f, 1.0f);            // relativeZ
-            buffer[9]  = Mathf.Clamp(o.relativeVelocityX, -1.0f, 1.0f);          // relativeVelocityX
-            buffer[10] = Mathf.Clamp(o.relativeVelocityZ, -1.0f, 1.0f);          // relativeVelocityZ
-            buffer[11] = Mathf.Clamp01(o.opponentAttackIntent01);                // opponentAttackIntent01
-            buffer[12] = o.incomingAttack ? 1.0f : 0.0f;                         // incomingAttack
-            buffer[13] = o.opponentRecovering ? 1.0f : 0.0f;                     // opponentRecovering
-            buffer[14] = o.selfCanAttack ? 1.0f : 0.0f;                          // selfCanAttack
-            buffer[15] = o.selfCanDodge ? 1.0f : 0.0f;                           // selfCanDodge
-            buffer[16] = o.selfCanBlock ? 1.0f : 0.0f;                           // selfCanBlock
-            buffer[17] = Mathf.Clamp(o.selfHealth01 - o.opponentHealth01, -1.0f, 1.0f); // healthAdvantage
+            float distNorm = net != null ? net.DistanceNorm : 10.0f;
+            float posNorm = net != null ? net.PosNorm : 5.0f;
+            uint rulesVersion = net != null ? net.RulesVersion : 1;
+
+            buffer[0]  = Mathf.Clamp01(o.distance / distNorm);
+            buffer[1]  = Mathf.Clamp01(o.selfHealth01);
+            buffer[2]  = Mathf.Clamp01(o.selfStamina01);
+            buffer[3]  = Mathf.Clamp01(o.opponentHealth01);
+            buffer[4]  = Mathf.Clamp01(o.opponentStamina01);
+            buffer[5]  = Mathf.Clamp01(o.selfGuard01);
+            buffer[6]  = Mathf.Clamp01(o.opponentGuard01);
+            buffer[7]  = Mathf.Clamp(o.relativeX / posNorm, -1.0f, 1.0f);
+            buffer[8]  = Mathf.Clamp(o.relativeZ / posNorm, -1.0f, 1.0f);
+
+            // Version-aware relative velocity:
+            // - Version 1 legacy weights were trained with relative position in slots 9-10.
+            // - Version 2+ weights are trained with true relative velocity in m/s.
+            if (rulesVersion == 1)
+            {
+                buffer[9]  = Mathf.Clamp(o.relativeX / posNorm, -1.0f, 1.0f);
+                buffer[10] = Mathf.Clamp(o.relativeZ / posNorm, -1.0f, 1.0f);
+            }
+            else
+            {
+                buffer[9]  = Mathf.Clamp(o.relativeVelocityX, -1.0f, 1.0f);
+                buffer[10] = Mathf.Clamp(o.relativeVelocityZ, -1.0f, 1.0f);
+            }
+
+            buffer[11] = Mathf.Clamp01(o.opponentAttackIntent01);
+            buffer[12] = o.incomingAttack ? 1.0f : 0.0f;
+            buffer[13] = o.opponentRecovering ? 1.0f : 0.0f;
+            buffer[14] = o.selfCanAttack ? 1.0f : 0.0f;
+            buffer[15] = o.selfCanDodge ? 1.0f : 0.0f;
+            buffer[16] = o.selfCanBlock ? 1.0f : 0.0f;
+            buffer[17] = Mathf.Clamp(o.selfHealth01 - o.opponentHealth01, -1.0f, 1.0f);
         }
     }
 }

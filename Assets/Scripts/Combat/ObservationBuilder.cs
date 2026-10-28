@@ -20,6 +20,9 @@ namespace BoxingAI
             Vector3 delta = playerPos - aiPos;
             Vector3 relativeVelocity = playerState.velocity - aiState.velocity;
 
+            Vector3 localDelta = aiController != null ? aiController.transform.InverseTransformDirection(delta) : delta;
+            Vector3 localRelVel = aiController != null ? aiController.transform.InverseTransformDirection(relativeVelocity) : relativeVelocity;
+
             return new BoxingObservation
             {
                 distance = Vector3.Distance(aiPos, playerPos),
@@ -29,10 +32,10 @@ namespace BoxingAI
                 opponentStamina01 = playerState.Stamina01,
                 selfGuard01 = aiState.guard,
                 opponentGuard01 = playerState.guard,
-                relativeX = delta.x,
-                relativeZ = delta.z,
-                relativeVelocityX = relativeVelocity.x,
-                relativeVelocityZ = relativeVelocity.z,
+                relativeX = localDelta.x,
+                relativeZ = localDelta.z,
+                relativeVelocityX = localRelVel.x,
+                relativeVelocityZ = localRelVel.z,
                 opponentAttackIntent01 = playerDetector.IsPunching ? 1f : 0f,
                 incomingAttack = playerDetector.IsPunching,
                 opponentRecovering = playerDetector.IsRecovering,

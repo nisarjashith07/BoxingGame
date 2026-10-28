@@ -20,6 +20,7 @@ class ThreadedCamera:
         self.cap = None
         self.ret = False
         self.frame = None
+        self.frame_time = 0.0
         self.running = False
         self.lock = threading.Lock()
         self.thread = None
@@ -80,11 +81,13 @@ class ThreadedCamera:
             # grab() is fast hardware frame query
             grabbed = self.cap.grab()
             if grabbed:
+                capture_time = time.perf_counter()
                 ret, frame = self.cap.retrieve()
                 if ret and frame is not None:
                     with self.lock:
                         self.ret = ret
                         self.frame = frame
+                        self.frame_time = capture_time
             else:
                 time.sleep(0.005)
 
@@ -97,6 +100,13 @@ class ThreadedCamera:
             if not self.ret or self.frame is None:
                 return False, None
             return True, self.frame
+
+    def read_timestamped(self):
+        """Returns (ret, frame, frame_time) safely without blocking."""
+        with self.lock:
+            if not self.ret or self.frame is None:
+                return False, None, 0.0
+            return True, self.frame, self.frame_time
 
     def release(self):
         self.running = False

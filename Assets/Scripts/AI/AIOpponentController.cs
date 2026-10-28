@@ -10,7 +10,7 @@ namespace BoxingAI
         [SerializeField] private bool createRuntimeProfile = true;
 
         [Header("Debug")]
-        [SerializeField] private bool logActions;
+        [SerializeField] private bool logActions = false;
 
         private AIOpponentBrain brain;
         private BoxingObservation latestObservation;

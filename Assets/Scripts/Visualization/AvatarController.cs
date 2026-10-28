@@ -47,13 +47,26 @@ public class AvatarController : MonoBehaviour
     [Range(0f, 1f)]
     public float dodgeWeight = 0.5f;
 
+    [Header("Mirroring Options")]
+    [Tooltip("Enables full-body mirroring so all movements (arms, torso, ducks, footwork) act like looking in a mirror reflection.")]
+    public bool fullBodyMirror = true;
+    [Tooltip("Inverts lateral X motion.")]
+    public bool invertLateral = false;
+
+    public bool mirrorLeftRight
+    {
+        get => fullBodyMirror;
+        set => fullBodyMirror = value;
+    }
+
     // Smoothed IK Targets
     private Vector3 s_leftHandPos, s_leftElbowPos;
     private Vector3 s_rightHandPos, s_rightElbowPos;
     private Quaternion s_leftHandRot, s_rightHandRot;
 
-    // Torso lean rotation
+    // Torso lean rotation & ducking
     private Quaternion s_spineRot = Quaternion.identity;
+    private float s_verticalDip = 0f;
 
     // Measured physical arm reach limits to prevent Two-Bone IK stretching
     private float leftArmMaxReach = 0.75f;
@@ -62,6 +75,7 @@ public class AvatarController : MonoBehaviour
     // Manual Punch State (for WASD / controller support)
     private float manualPunchTimer;
     private bool manualPunchIsLeft;
+    private bool manualPunchIsHook;
 
     // Combat System World Position Accessors
     public Vector3 LeftHandWorldPos => s_leftHandPos != Vector3.zero ? s_leftHandPos : (animator != null && animator.GetBoneTransform(HumanBodyBones.LeftHand) != null ? animator.GetBoneTransform(HumanBodyBones.LeftHand).position : transform.position + transform.forward * 0.5f);
@@ -102,10 +116,11 @@ public class AvatarController : MonoBehaviour
         currentPose = pose;
     }
 
-    public void TriggerManualPunch(bool isLeft)
+    public void TriggerManualPunch(bool isLeft, bool isHook = false)
     {
         manualPunchTimer = 0.35f;
         manualPunchIsLeft = isLeft;
+        manualPunchIsHook = isHook;
     }
 
     private Vector3 GetMpVector(int index, bool isRightArm = false)
@@ -137,8 +152,11 @@ public class AvatarController : MonoBehaviour
         if (targetLandmarks == null || targetLandmarks.Count <= index) return Vector3.zero;
 
         Landmark lm = targetLandmarks[index];
-        // Mirror X (lateral), Invert Y (vertical height), Invert Z (forward punch extension)
-        return new Vector3(-lm.x, -lm.y, -lm.z);
+        if (lm.visibility > 0f && lm.visibility < 0.25f) return Vector3.zero;
+        if (lm.x == 0f && lm.y == 0f && lm.z == 0f) return Vector3.zero;
+        // Lateral X (invertLateral flips X sign), Invert Y (vertical height), Invert Z (forward punch extension)
+        float x = invertLateral ? lm.x : -lm.x;
+        return new Vector3(x, -lm.y, -lm.z);
     }
 
     void Update()
@@ -156,18 +174,45 @@ public class AvatarController : MonoBehaviour
         Vector3 lShoulderPos = leftShoulder != null ? leftShoulder.position : transform.position - transform.right * 0.25f + Vector3.up * 1.4f;
         Vector3 rShoulderPos = rightShoulder != null ? rightShoulder.position : transform.position + transform.right * 0.25f + Vector3.up * 1.4f;
 
+        // Hotkey [M] to toggle mirror mode
+#if ENABLE_INPUT_SYSTEM
+        if (UnityEngine.InputSystem.Keyboard.current != null && UnityEngine.InputSystem.Keyboard.current.mKey.wasPressedThisFrame)
+        {
+            fullBodyMirror = !fullBodyMirror;
+            Debug.Log($"[AvatarController] Full Body Mirror: {(fullBodyMirror ? "ON (Mirror Reflection)" : "OFF (Anatomical)")}");
+        }
+#else
+        if (Input.GetKeyDown(KeyCode.M))
+        {
+            fullBodyMirror = !fullBodyMirror;
+            Debug.Log($"[AvatarController] Full Body Mirror: {(fullBodyMirror ? "ON (Mirror Reflection)" : "OFF (Anatomical)")}");
+        }
+#endif
+
         if (currentPose != null && currentPose.landmarks != null && currentPose.landmarks.Count == 33)
         {
+            int lShoulder = fullBodyMirror ? 11 : 12;
+            int lElbow = fullBodyMirror ? 13 : 14;
+            int lWrist = fullBodyMirror ? 15 : 16;
+            int lPinky = fullBodyMirror ? 19 : 20;
+            int lIndex = fullBodyMirror ? 17 : 18;
+
+            int rShoulder = fullBodyMirror ? 12 : 11;
+            int rElbow = fullBodyMirror ? 14 : 13;
+            int rWrist = fullBodyMirror ? 16 : 15;
+            int rPinky = fullBodyMirror ? 20 : 19;
+            int rIndex = fullBodyMirror ? 18 : 17;
+
             // --- ARM CALCULATIONS FROM DUAL-CAMERA MEDIAPIPE ---
             CalculateArmTargets(
-                11, 13, 15, 19, 17, 
+                lShoulder, lElbow, lWrist, lIndex, lPinky, 
                 HumanBodyBones.LeftUpperArm, HumanBodyBones.LeftLowerArm, HumanBodyBones.LeftHand,
                 ref s_leftHandPos, ref s_leftElbowPos, ref s_leftHandRot,
                 false
             );
 
             CalculateArmTargets(
-                12, 14, 16, 20, 18, 
+                rShoulder, rElbow, rWrist, rIndex, rPinky, 
                 HumanBodyBones.RightUpperArm, HumanBodyBones.RightLowerArm, HumanBodyBones.RightHand,
                 ref s_rightHandPos, ref s_rightElbowPos, ref s_rightHandRot,
                 true
@@ -199,6 +244,11 @@ public class AvatarController : MonoBehaviour
             float ext = Mathf.Sin(punchProgress * Mathf.PI);
 
             Vector3 punchTargetOffset = transform.forward * (ext * 0.95f);
+            if (manualPunchIsHook)
+            {
+                float lateralArc = Mathf.Sin(punchProgress * Mathf.PI) * 0.35f;
+                punchTargetOffset += (manualPunchIsLeft ? transform.right : -transform.right) * lateralArc;
+            }
 
             if (manualPunchIsLeft)
             {
@@ -236,8 +286,17 @@ public class AvatarController : MonoBehaviour
         // Vector offset from shoulder to wrist in MediaPipe space
         Vector3 localReachVector = mpw - mps;
 
-        // Apply forward punch extension multiplier
-        localReachVector.z *= punchReachMultiplier;
+        // Dynamic forward punch extension: amplify monocular Z depth to full character reach
+        float rawZ = localReachVector.z;
+        if (rawZ > 0.08f)
+        {
+            float norm = Mathf.Clamp01((rawZ - 0.08f) / 0.22f);
+            localReachVector.z = Mathf.Lerp(rawZ, 0.65f * punchReachMultiplier, norm);
+        }
+        else
+        {
+            localReachVector.z *= punchReachMultiplier;
+        }
 
         // Transform into Avatar's world orientation and scale to character size
         Vector3 worldReachVector = transform.TransformDirection(localReachVector) * avatarScale;
@@ -259,8 +318,9 @@ public class AvatarController : MonoBehaviour
         // Fist rotation with authentic boxing glove pronation on punch extension
         Vector3 forward = transform.TransformDirection((mpi - mpw).normalized);
         Vector3 up = transform.TransformDirection((mpi - mpp).normalized);
-        Quaternion targetRot = Quaternion.identity;
-        if (forward != Vector3.zero && up != Vector3.zero)
+        Quaternion defaultHandRot = Quaternion.LookRotation(transform.forward, Vector3.up);
+        Quaternion targetRot = defaultHandRot;
+        if (forward.sqrMagnitude > 0.01f && up.sqrMagnitude > 0.01f)
         {
             targetRot = Quaternion.LookRotation(forward, up);
 
@@ -268,6 +328,11 @@ public class AvatarController : MonoBehaviour
             float extension = Mathf.Clamp01(localReachVector.magnitude / 0.55f);
             float pronationAngle = Mathf.Lerp(0f, isRightArm ? -75f : 75f, extension);
             targetRot = Quaternion.AngleAxis(pronationAngle, forward) * targetRot;
+        }
+        else if (localReachVector.sqrMagnitude > 0.01f)
+        {
+            Vector3 armDir = transform.TransformDirection(localReachVector.normalized);
+            targetRot = Quaternion.LookRotation(armDir, Vector3.up);
         }
 
         // Dynamic smoothing: punch speed accelerates responsiveness for instant snap
@@ -309,11 +374,28 @@ public class AvatarController : MonoBehaviour
 
         Vector3 torsoOffset = shoulderMid - hipMid;
 
-        float slipAngle = -torsoOffset.x * 35f * dodgeWeight;
+        float slipMultiplier = fullBodyMirror ? 35f : -35f;
+        float slipAngle = torsoOffset.x * slipMultiplier * dodgeWeight;
         float leanAngle = torsoOffset.z * 30f * dodgeWeight;
 
         Quaternion targetSpineRot = Quaternion.Euler(leanAngle, 0f, slipAngle);
         s_spineRot = Quaternion.Slerp(s_spineRot, targetSpineRot, Time.deltaTime * baseSmoothingSpeed);
+
+        // Pelvic ducking: check body_offset_y or vertical shoulder dip
+        float targetDip = 0f;
+        if (currentPose != null && currentPose.body_offset_y < -0.03f)
+        {
+            targetDip = Mathf.Clamp(-currentPose.body_offset_y * 1.2f, 0f, 0.40f) * dodgeWeight;
+        }
+        else
+        {
+            float verticalOffset = -torsoOffset.y;
+            if (verticalOffset > 0.05f)
+            {
+                targetDip = Mathf.Clamp((verticalOffset - 0.05f) * 1.5f, 0f, 0.35f) * dodgeWeight;
+            }
+        }
+        s_verticalDip = Mathf.Lerp(s_verticalDip, targetDip, Time.deltaTime * baseSmoothingSpeed);
     }
 
     void OnAnimatorIK(int layerIndex)
@@ -326,6 +408,12 @@ public class AvatarController : MonoBehaviour
         {
             animator.SetLookAtWeight(ikWeight);
             animator.SetLookAtPosition(headBone.position + transform.forward * 5f);
+        }
+
+        // Pelvis ducking / squatting under punches
+        if (enableTorsoDodge && s_verticalDip > 0.015f)
+        {
+            animator.bodyPosition = animator.bodyPosition - Vector3.up * s_verticalDip;
         }
 
         // Torso Dodge Spine adjustment
@@ -357,5 +445,25 @@ public class AvatarController : MonoBehaviour
 
         animator.SetIKHintPositionWeight(AvatarIKHint.RightElbow, ikWeight);
         animator.SetIKHintPosition(AvatarIKHint.RightElbow, s_rightElbowPos);
+
+        // Full Body Leg / Knee hints (if visible in camera)
+        Vector3 lKnee = GetMpVector(25);
+        Vector3 rKnee = GetMpVector(26);
+        Transform lHip = animator.GetBoneTransform(HumanBodyBones.LeftUpperLeg);
+        Transform rHip = animator.GetBoneTransform(HumanBodyBones.RightUpperLeg);
+
+        if (lKnee != Vector3.zero && lHip != null)
+        {
+            Vector3 kneeHintL = lHip.position + transform.TransformDirection(lKnee - GetMpVector(23)) * avatarScale;
+            animator.SetIKHintPositionWeight(AvatarIKHint.LeftKnee, ikWeight * 0.6f);
+            animator.SetIKHintPosition(AvatarIKHint.LeftKnee, kneeHintL);
+        }
+
+        if (rKnee != Vector3.zero && rHip != null)
+        {
+            Vector3 kneeHintR = rHip.position + transform.TransformDirection(rKnee - GetMpVector(24)) * avatarScale;
+            animator.SetIKHintPositionWeight(AvatarIKHint.RightKnee, ikWeight * 0.6f);
+            animator.SetIKHintPosition(AvatarIKHint.RightKnee, kneeHintR);
+        }
     }
 }

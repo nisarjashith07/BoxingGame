@@ -71,8 +71,8 @@ namespace BoxingAI
                     aiGo = Object.Instantiate(playerTransform.gameObject);
                     aiGo.name = "AIFighter";
 
-                    // Position facing player, 1.5m away (ideal boxing pocket range)
-                    aiGo.transform.position = playerTransform.position + playerTransform.forward * 1.5f;
+                    // Position facing player in the boxing pocket (1.05m away)
+                    aiGo.transform.position = playerTransform.position + playerTransform.forward * 1.05f;
                     aiGo.transform.rotation = Quaternion.LookRotation(-playerTransform.forward, Vector3.up);
 
                     // Remove player-specific controllers from AI clone

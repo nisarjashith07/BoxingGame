@@ -30,22 +30,26 @@ MAX_STAMINA     = 100.0
 MAX_STEPS       = 300          # 1 round
 ARENA_HALF      = 5.0          # half the ring size
 IDEAL_RANGE     = 1.5          # optimal punching distance
+STEP_DT         = 0.15         # decision interval in seconds (~6.7 Hz)
 
-# Punch definitions: (stamina_cost, base_damage, range, startup_frames)
+# Punch definitions matched to Unity CombatSettings.cs:
+# (cost=12.0, Jab=8 dmg, Cross=14 dmg, Hooks=18 dmg, hitRange=1.8m)
 PUNCH_STATS = {
-    5:  dict(cost=8.0,  dmg=10.0, rng=1.8, startup=2),   # Jab
-    6:  dict(cost=12.0, dmg=15.0, rng=1.6, startup=3),   # Cross
-    7:  dict(cost=14.0, dmg=18.0, rng=1.4, startup=4),   # HookLeft
-    8:  dict(cost=14.0, dmg=18.0, rng=1.4, startup=4),   # HookRight
+    5:  dict(cost=12.0, dmg=8.0,  rng=1.8, startup=2),   # Jab
+    6:  dict(cost=12.0, dmg=14.0, rng=1.8, startup=3),   # Cross
+    7:  dict(cost=12.0, dmg=18.0, rng=1.6, startup=4),   # HookLeft
+    8:  dict(cost=12.0, dmg=18.0, rng=1.6, startup=4),   # HookRight
 }
 
-MOVE_SPEED      = 0.25   # units per step
-DODGE_DURATION  = 3      # steps of invulnerability
-DODGE_COOLDOWN  = 8      # steps before next dodge allowed
-BLOCK_REDUCTION = 0.35   # damage multiplier when blocking (block absorbs 65%)
-STAMINA_REGEN   = 3.0    # per step
-STAMINA_BLOCK   = 1.5    # stamina drained per step while blocking
-ATTACK_COOLDOWN = 6      # steps between attacks
+MOVE_SPEED      = 0.25   # units per step (~1.6 m/s)
+DODGE_DURATION  = 2      # steps of active invulnerability (0.25s / 0.15s)
+DODGE_COOLDOWN  = 4      # steps before next dodge allowed (0.6s / 0.15s)
+DODGE_COST      = 20.0   # stamina cost for dodge (matches CombatSettings.dodgeStaminaCost)
+BLOCK_REDUCTION = 0.25   # damage multiplier when blocking (block absorbs 75% -> 0.25 taken)
+STAMINA_REGEN   = 1.2    # stamina per step (matches 8.0/s * 0.15s)
+STAMINA_BLOCK   = 0.75   # stamina drained per step while blocking (5.0/s * 0.15s)
+ATTACK_COOLDOWN = 3      # steps between attacks (0.4s / 0.15s)
+RECOVERY_STEPS  = 2      # steps of recovery on whiff/hit (0.3s / 0.15s)
 
 # --- Fighter State -------------------------------------------------------------
 
@@ -76,13 +80,13 @@ class FighterState:
     def can_attack(self) -> bool:
         return (self.attack_cd == 0
                 and not self.is_recovering
-                and self.stamina >= 8.0)
+                and self.stamina >= 12.0)
 
     @property
     def can_dodge(self) -> bool:
         return (self.dodge_cd == 0
                 and not self.is_recovering
-                and self.stamina >= 10.0)
+                and self.stamina >= DODGE_COST)
 
     @property
     def can_block(self) -> bool:
@@ -265,6 +269,12 @@ class BoxingEnv(gym.Env):
         # -- Apply actions -------------------------------------------------
         reward = 0.0
 
+        # Track previous coordinates for accurate physical velocity calculation
+        prev_agent_x = agent.x
+        prev_agent_z = agent.z
+        prev_opp_x = opp.x
+        prev_opp_z = opp.z
+
         # Agent action
         agent_punch_damage = 0.0
         self._agent_attacking = False
@@ -303,17 +313,17 @@ class BoxingEnv(gym.Env):
 
         elif action == 10:  # DodgeLeft
             if agent.can_dodge:
-                agent.stamina      = max(0, agent.stamina - 10.0)
+                agent.stamina      = max(0, agent.stamina - DODGE_COST)
                 agent.dodge_active = DODGE_DURATION
                 agent.dodge_cd     = DODGE_COOLDOWN
-                agent.x           -= MOVE_SPEED * 2
+                agent.x            = np.clip(agent.x - MOVE_SPEED * 2, -ARENA_HALF, ARENA_HALF)
 
         elif action == 11:  # DodgeRight
             if agent.can_dodge:
-                agent.stamina      = max(0, agent.stamina - 10.0)
+                agent.stamina      = max(0, agent.stamina - DODGE_COST)
                 agent.dodge_active = DODGE_DURATION
                 agent.dodge_cd     = DODGE_COOLDOWN
-                agent.x           += MOVE_SPEED * 2
+                agent.x            = np.clip(agent.x + MOVE_SPEED * 2, -ARENA_HALF, ARENA_HALF)
 
         elif action == 1:  # MoveForward (toward opp)
             sign = np.sign(opp.z - agent.z) or 1.0
@@ -339,7 +349,7 @@ class BoxingEnv(gym.Env):
 
         if opp_action in (5, 6, 7, 8):
             self._opp_attacking = True
-            if opp.can_attack:
+            if opp.alive and opp.can_attack:
                 stats = PUNCH_STATS[opp_action]
                 if opp.stamina >= stats['cost']:
                     opp.stamina     = max(0, opp.stamina - stats['cost'])
@@ -372,17 +382,17 @@ class BoxingEnv(gym.Env):
 
         elif opp_action == 10:
             if opp.can_dodge:
-                opp.stamina      = max(0, opp.stamina - 10.0)
+                opp.stamina      = max(0, opp.stamina - DODGE_COST)
                 opp.dodge_active = DODGE_DURATION
                 opp.dodge_cd     = DODGE_COOLDOWN
-                opp.x           -= MOVE_SPEED * 2
+                opp.x            = np.clip(opp.x - MOVE_SPEED * 2, -ARENA_HALF, ARENA_HALF)
 
         elif opp_action == 11:
             if opp.can_dodge:
-                opp.stamina      = max(0, opp.stamina - 10.0)
+                opp.stamina      = max(0, opp.stamina - DODGE_COST)
                 opp.dodge_active = DODGE_DURATION
                 opp.dodge_cd     = DODGE_COOLDOWN
-                opp.x           += MOVE_SPEED * 2
+                opp.x            = np.clip(opp.x + MOVE_SPEED * 2, -ARENA_HALF, ARENA_HALF)
 
         elif opp_action == 1:
             sign = np.sign(agent.z - opp.z) or 1.0
@@ -401,6 +411,12 @@ class BoxingEnv(gym.Env):
         if opp_action != 9:
             opp.is_blocking = False
 
+        # -- Physical velocity calculation (m/s in world space) ------------
+        agent.vx = float((agent.x - prev_agent_x) / STEP_DT)
+        agent.vz = float((agent.z - prev_agent_z) / STEP_DT)
+        opp.vx = float((opp.x - prev_opp_x) / STEP_DT)
+        opp.vz = float((opp.z - prev_opp_z) / STEP_DT)
+
         # -- Stamina regeneration ------------------------------------------
         if action not in (5, 6, 7, 8, 9):
             agent.stamina = min(MAX_STAMINA, agent.stamina + STAMINA_REGEN)
@@ -412,10 +428,6 @@ class BoxingEnv(gym.Env):
             agent.guard = min(1.0, agent.guard + 0.02)
         if opp.guard < 1.0 and not self._agent_attacking:
             opp.guard = min(1.0, opp.guard + 0.02)
-
-        # Update relative velocities (simple)
-        agent.vx = float(np.clip(opp.x - agent.x, -1, 1))
-        agent.vz = float(np.clip(opp.z - agent.z, -1, 1))
 
         self._step += 1
 
@@ -495,30 +507,47 @@ class BoxingEnv(gym.Env):
     def _get_obs(self) -> np.ndarray:
         a = self._agent
         o = self._opp
-        dist = self._distance()
+        dist = max(self._distance(), 0.001)
         rel_x = float(o.x - a.x)
         rel_z = float(o.z - a.z)
         health_adv = float((a.hp - o.hp) / MAX_HP)
 
+        # Agent forward unit vector (facing opponent) and right unit vector
+        fwd_x = rel_x / dist
+        fwd_z = rel_z / dist
+        right_x = fwd_z
+        right_z = -fwd_x
+
+        # World relative velocity vector (opponent velocity - agent velocity)
+        # Matches Unity ObservationBuilder: relativeVelocity = playerState.velocity - aiState.velocity
+        rel_world_vx = o.vx - a.vx
+        rel_world_vz = o.vz - a.vz
+
+        # Transform into agent's local coordinate frame
+        # localRelVel.x = rel_world · right
+        # localRelVel.z = rel_world · fwd
+        local_rel_vx = rel_world_vx * right_x + rel_world_vz * right_z
+        local_rel_vz = rel_world_vx * fwd_x + rel_world_vz * fwd_z
+
         obs = np.array([
-            dist / (ARENA_HALF * 2),              # distance (normalised)
-            a.hp        / MAX_HP,                 # selfHealth01
-            a.stamina   / MAX_STAMINA,            # selfStamina01
-            o.hp        / MAX_HP,                 # opponentHealth01
-            o.stamina   / MAX_STAMINA,            # opponentStamina01
-            a.guard,                              # selfGuard01
-            o.guard,                              # opponentGuard01
-            float(np.clip(rel_x / ARENA_HALF, -1, 1)),  # relativeX
-            float(np.clip(rel_z / ARENA_HALF, -1, 1)),  # relativeZ
-            float(np.clip(a.vx, -1, 1)),          # relativeVelocityX
-            float(np.clip(a.vz, -1, 1)),          # relativeVelocityZ
-            float(self._opp_attacking),           # opponentAttackIntent01
-            float(self._opp_attacking),           # incomingAttack (bool)
-            float(o.is_recovering),               # opponentRecovering
-            float(a.can_attack),                  # selfCanAttack
-            float(a.can_dodge),                   # selfCanDodge
-            float(a.can_block),                   # selfCanBlock
-            health_adv,                           # healthAdvantage (extra feature)
+            dist / (ARENA_HALF * 2),                    # 0: distance (normalised)
+            a.hp        / MAX_HP,                       # 1: selfHealth01
+            a.stamina   / MAX_STAMINA,                  # 2: selfStamina01
+            o.hp        / MAX_HP,                       # 3: opponentHealth01
+            o.stamina   / MAX_STAMINA,                  # 4: opponentStamina01
+            a.guard,                                    # 5: selfGuard01
+            o.guard,                                    # 6: opponentGuard01
+            float(np.clip(rel_x / ARENA_HALF, -1, 1)),  # 7: relativeX
+            float(np.clip(rel_z / ARENA_HALF, -1, 1)),  # 8: relativeZ
+            float(np.clip(local_rel_vx, -1, 1)),        # 9: relativeVelocityX (m/s in local frame)
+            float(np.clip(local_rel_vz, -1, 1)),        # 10: relativeVelocityZ (m/s in local frame)
+            float(self._opp_attacking),                 # 11: opponentAttackIntent01
+            float(self._opp_attacking),                 # 12: incomingAttack (bool)
+            float(o.is_recovering),                     # 13: opponentRecovering
+            float(a.can_attack),                        # 14: selfCanAttack
+            float(a.can_dodge),                         # 15: selfCanDodge
+            float(a.can_block),                         # 16: selfCanBlock
+            health_adv,                                 # 17: healthAdvantage
         ], dtype=np.float32)
         return obs
 

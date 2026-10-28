@@ -35,7 +35,7 @@ class DualPoseVisualizer:
         self.fps_counter = 0
         self.current_fps = 0.0
 
-    def draw_skeleton_2d(self, frame, landmarks_2d, is_side=False):
+    def draw_skeleton_2d(self, frame, landmarks_2d, is_side=False, flip_h=False):
         """Draws clean, antialiased skeleton bones and colored joints."""
         if landmarks_2d is None:
             return frame
@@ -46,7 +46,7 @@ class DualPoseVisualizer:
         for i, lm in enumerate(landmarks_2d):
             vis = getattr(lm, 'visibility', 1.0)
             if vis is not None and vis > 0.25:
-                px = int(lm.x * w)
+                px = int((1.0 - lm.x) * w) if flip_h else int(lm.x * w)
                 py = int(lm.y * h)
                 pts[i] = (px, py)
 
@@ -104,14 +104,19 @@ class DualPoseVisualizer:
         f_resized = cv2.resize(front_frame, (new_f_w, target_h))
         s_resized = cv2.resize(side_frame, (new_s_w, target_h))
 
+        is_front_flipped = getattr(tracker, 'front_flip_h', True)
+        if is_front_flipped:
+            f_resized = cv2.flip(f_resized, 1)
+
         # Overlay 2D skeletons
         if tracker.latest_2d_front is not None:
-            f_resized = self.draw_skeleton_2d(f_resized, tracker.latest_2d_front, is_side=False)
+            f_resized = self.draw_skeleton_2d(f_resized, tracker.latest_2d_front, is_side=False, flip_h=is_front_flipped)
         if tracker.latest_2d_side is not None:
-            s_resized = self.draw_skeleton_2d(s_resized, tracker.latest_2d_side, is_side=True)
+            s_resized = self.draw_skeleton_2d(s_resized, tracker.latest_2d_side, is_side=True, flip_h=False)
 
         # Labels on individual camera viewports
-        self._draw_cam_badge(f_resized, "FRONT CAMERA (PC Webcam)", "TRACKING LATERAL + VERTICAL", (0, 220, 100))
+        front_title = "FRONT CAMERA (MIRRORED)" if is_front_flipped else "FRONT CAMERA (NORMAL)"
+        self._draw_cam_badge(f_resized, front_title, "TRACKING LATERAL + VERTICAL", (0, 220, 100))
         side_sub = "OPTICAL DEPTH PUNCH REACH" if tracker.side_on_right else "SIDE CAMERA (LEFT)"
         self._draw_cam_badge(s_resized, "SIDE CAMERA (Phone on Right)", side_sub, (0, 165, 255))
 
@@ -131,10 +136,18 @@ class DualPoseVisualizer:
         # --- HEADER RENDERING ---
         cv2.putText(header, "VR BOXING DUAL-CAM AI TRACKER", (20, 38), cv2.FONT_HERSHEY_DUPLEX, 0.85, (255, 255, 255), 2, cv2.LINE_AA)
         
-        has_dual = (tracker.latest_2d_front is not None) and (tracker.latest_2d_side is not None)
-        status_text = "● 3D DUAL-CAM FUSION ACTIVE" if has_dual else "○ SINGLE CAM FALLBACK"
-        status_col = (0, 255, 120) if has_dual else (0, 180, 255)
-        cv2.putText(header, status_text, (total_w - 560, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.65, status_col, 2, cv2.LINE_AA)
+        status_text = getattr(tracker, 'sync_status_str', "● 3D DUAL-CAM ACTIVE")
+        is_healthy = getattr(tracker, 'sync_healthy', False)
+        is_skewed = getattr(tracker, 'is_skewed', False)
+
+        if is_healthy:
+            status_col = (0, 255, 120)
+        elif is_skewed:
+            status_col = (0, 165, 255)
+        else:
+            status_col = (0, 180, 255)
+
+        cv2.putText(header, status_text, (total_w - 600, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.65, status_col, 2, cv2.LINE_AA)
 
         fps_str = f"{self.current_fps:.1f} FPS"
         cv2.putText(header, f"UDP: 5055 | {fps_str}", (total_w - 210, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.60, (200, 200, 200), 1, cv2.LINE_AA)
@@ -158,7 +171,7 @@ class DualPoseVisualizer:
             cv2.putText(footer, reach_info, (740, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (170, 170, 170), 1, cv2.LINE_AA)
 
         # Hotkeys hint bar at bottom of footer
-        hint_text = "[C] Calibrate Guard Stance   |   [M] Flip Side Mirror   |   [R] Rotate Side 90 deg   |   [Q] Quit"
+        hint_text = "[C] Calibrate Guard  |  [F] Flip Front Mirror  |  [M] Flip Side Mirror  |  [R] Rotate Side 90 deg  |  [Q] Quit"
         cv2.putText(footer, hint_text, (20, 95), cv2.FONT_HERSHEY_SIMPLEX, 0.50, (0, 255, 200), 1, cv2.LINE_AA)
         cv2.line(footer, (0, 0), (total_w, 0), (50, 50, 50), 1)
 
@@ -212,10 +225,4 @@ class DualPoseVisualizer:
         cv2.rectangle(img, (x, bar_y), (x + bar_w, bar_y + bar_h), (80, 80, 80), 1)
 
 
-# Legacy visualizer wrapper
-class PoseVisualizer:
-    def __init__(self):
-        self.dashboard = DualPoseVisualizer()
 
-    def draw(self, frame, pose):
-        return frame

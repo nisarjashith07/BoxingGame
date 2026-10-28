@@ -31,23 +31,40 @@ public class MatchTimer : MonoBehaviour
         timeRemaining = roundDuration;
     }
 
+    public string FormattedTime
+    {
+        get
+        {
+            float t = Mathf.Max(0f, timeRemaining);
+            int minutes = Mathf.FloorToInt(t / 60);
+            int seconds = Mathf.FloorToInt(t % 60);
+            return string.Format("{0}:{1:00}", minutes, seconds);
+        }
+    }
+
     void Update()
     {
         if (!isRunning) return;
 
-        if (timeRemaining > 0)
+        if (timeRemaining > 0f)
         {
             timeRemaining -= Time.deltaTime;
+            if (timeRemaining <= 0f)
+            {
+                timeRemaining = 0f;
+                isRunning = false;
+            }
 
-            int minutes = Mathf.FloorToInt(timeRemaining / 60);
-            int seconds = Mathf.FloorToInt(timeRemaining % 60);
-
-            timerText.text = string.Format("{0}:{1:00}", minutes, seconds);
+            if (timerText != null)
+            {
+                timerText.text = FormattedTime;
+            }
         }
         else
         {
-            timeRemaining = 0;
-            timerText.text = "0:00";
+            timeRemaining = 0f;
+            if (timerText != null)
+                timerText.text = "0:00";
             isRunning = false;
         }
     }

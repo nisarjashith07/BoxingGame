@@ -56,9 +56,15 @@ def export():
     policy.load_state_dict(ckpt['policy_state_dict'])
     policy.eval()
 
-    print(f"  Trained for {ckpt.get('global_step', '?'):,} steps")
-    print(f"  Mean reward : {ckpt.get('mean_reward', '?'):.2f}")
-    print(f"  Win rate    : {ckpt.get('win_rate', '?')*100:.1f}%")
+    step_val = ckpt.get('global_step', None)
+    step_str = f"{step_val:,}" if step_val is not None else "?"
+    print(f"  Trained for {step_str} steps")
+    mr = ckpt.get('mean_reward', None)
+    mr_str = f"{mr:.2f}" if mr is not None else "?"
+    print(f"  Mean reward : {mr_str}")
+    wr = ckpt.get('win_rate', None)
+    wr_str = f"{wr*100:.1f}%" if wr is not None else "?"
+    print(f"  Win rate    : {wr_str}")
 
     # -- Wrap actor-only ---------------------------------------------------
     actor = ActorOnly(policy)
